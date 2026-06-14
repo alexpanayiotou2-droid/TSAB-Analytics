@@ -1,22 +1,31 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
+import os
 
 # --- 1. SETUP & CONFIG ---
 st.set_page_config(page_title="TSAB Data Dashboard", layout="wide")
 st.title("🎸 TSAB Cloud-Ready ROI Dashboard & AI Anomaly Engine")
-st.markdown("Upload your latest raw CSVs to process cross-platform correlations, retention decay, and algorithmic triggers.")
+st.markdown("Automated cross-platform correlations, retention decay, and algorithmic triggers.")
 
-# --- 2. CLOUD UPLOADERS ---
+# --- 2. HYBRID DATA PIPELINE ---
 with st.sidebar:
-    st.header("Data Uploaders")
-    dk_file = st.file_uploader("1. DistroKid Raw Data (CSV) [Required]", type="csv")
-    spot_file = st.file_uploader("2. Spotify Campaigns (CSV) [Required]", type="csv")
-    meta_file = st.file_uploader("3. Meta/IG Ads (CSV) [Optional]", type="csv")
+    st.header("Update Data (Optional)")
+    st.markdown("Dashboard loads automatically from GitHub. Upload new files here to test overrides before committing them.")
+    
+    # Create uploaders, but don't make them mandatory
+    dk_upload = st.file_uploader("Override DistroKid Data", type="csv")
+    spot_upload = st.file_uploader("Override Spotify Data", type="csv")
+    meta_upload = st.file_uploader("Override Meta Ads", type="csv")
+
+# Logic: Use the uploaded file if present. If not, look for the file stored in GitHub/Local folder.
+dk_file = dk_upload if dk_upload else ("DistroKid Results 6.12.26.csv" if os.path.exists("DistroKid Results 6.12.26.csv") else None)
+spot_file = spot_upload if spot_upload else ("Spotify Campaigns to date 6.12.26.csv" if os.path.exists("Spotify Campaigns to date 6.12.26.csv") else None)
+meta_file = meta_upload if meta_upload else None 
 
 # --- Gatekeeper: Only wait for the required files ---
 if not (dk_file and spot_file):
-    st.info("👋 Welcome! Please upload your DistroKid and Spotify CSV files in the sidebar to load the dashboard. (Meta data is optional).")
+    st.info("👋 Welcome! Waiting for data. Please ensure your CSVs are uploaded to GitHub, or drop them in the sidebar.")
     st.stop()
 
 # --- 3. DATA PROCESSING & CLEANING ---
