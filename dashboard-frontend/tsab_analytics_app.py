@@ -2,16 +2,152 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import os
+import json
+import urllib.request
+import ssl
 
 # --- 1. SETUP & CONFIG ---
 st.set_page_config(page_title="TSAB Data Dashboard", layout="wide")
 st.title("🎸 TSAB Cloud-Ready ROI Dashboard")
 st.markdown("Automated cross-platform correlations, retention decay, and algorithmic triggers.")
 
+# --- ENVIRONMENT VARIABLES & SUPABASE LOADER ---
+def load_env():
+    # Try current dir first, then parent dir
+    paths = [".env", "../.env"]
+    for path in paths:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ[k.strip()] = v.strip().strip("'").strip('"')
+            break
+
+load_env()
+
+# Predefined Column Maps to rename database snake_case back to Title Case expected by frontend
+DK_COLUMN_MAP = {
+    'date_inserted': 'Date Inserted',
+    'reporting_date': 'Reporting Date',
+    'sale_month': 'Sale Month',
+    'store': 'Store',
+    'artist': 'Artist',
+    'title': 'Title',
+    'isrc': 'ISRC',
+    'upc': 'UPC',
+    'quantity': 'Quantity',
+    'team_percentage': 'Team Percentage',
+    'source_type': 'Source Type',
+    'country_of_sale': 'Country of Sale',
+    'songwriter_royalties_withheld_usd': 'Songwriter Royalties Withheld (USD)',
+    'earnings_usd': 'Earnings (USD)',
+    'recoup_usd': 'Recoup (USD)'
+}
+
+SPOTIFY_COLUMN_MAP = {
+    'release_date': 'Release Date',
+    'start_date': 'Start Date',
+    'end_date': 'End Date',
+    'release_name': 'Release Name',
+    'campaign_name': 'Campaign Name',
+    'artist_name': 'Artist Name',
+    'format': 'Format',
+    'release_type': 'Release Type',
+    'country_targeting': 'Country Targeting',
+    'currency': 'Currency',
+    'tax_rate': 'Tax Rate',
+    'budget': 'Budget',
+    'budget_incl_tax': 'Budget (incl. tax)',
+    'spend': 'Spend',
+    'spend_incl_tax': 'Spend (incl. tax)',
+    'segment_targeting': 'Segment Targeting',
+    'reach': 'Reach',
+    'clicks': 'Clicks',
+    'amplified_listeners': 'Amplified Listeners',
+    'reactivated_listeners': 'Reactivated Listeners',
+    'new_active_listeners': 'New Active Listeners',
+    'light_listeners_after_converting': 'Light Listeners (after converting)',
+    'moderate_listeners_after_converting': 'Moderate Listeners (after converting)',
+    'super_listeners_after_converting': 'Super Listeners (after converting)',
+    'converted_listeners': 'Converted Listeners',
+    'conversion_rate': 'Conversion Rate',
+    'active_streams_per_listener': 'Active Streams Per Listener',
+    'intent_rate': 'Intent Rate',
+    'playlist_add_rate': 'Playlist Add Rate',
+    'playlist_adds': 'Playlist Adds',
+    'save_rate': 'Save Rate',
+    'saves': 'Saves',
+    'listeners_of_artists_other_releases': "Listeners of Artist's Other Releases",
+    'active_streams_per_listener_for_artists_other_releases': "Active Streams Per Listener for Artist's Other Releases",
+    'saves_of_artists_other_releases': "Saves of Artist's Other Releases",
+    'playlist_adds_of_artists_other_releases': "Playlist Adds of Artist's Other Releases"
+}
+
+@st.cache_data(ttl=300)
+def load_supabase_table(url, key, table_name):
+    """
+    Pagination-aware reader to load all records from a Supabase table.
+    """
+    all_data = []
+    limit = 1000
+    offset = 0
+    ssl_context = ssl.create_default_context()
+    
+    headers = {
+        'apikey': key,
+        'Authorization': f'Bearer {key}'
+    }
+    
+    while True:
+        endpoint = f"{url.rstrip('/')}/rest/v1/{table_name}?select=*&limit={limit}&offset={offset}"
+        req = urllib.request.Request(endpoint, headers=headers)
+        with urllib.request.urlopen(req, context=ssl_context) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if not data:
+                break
+            all_data.extend(data)
+            if len(data) < limit:
+                break
+            offset += limit
+            
+    return pd.DataFrame(all_data)
+
+def load_base_data(table_name, local_file_name, column_map):
+    """
+    Attempts to load data from Supabase. Falls back to a local CSV file if connection fails.
+    """
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY")
+    
+    if url and key:
+        try:
+            df = load_supabase_table(url, key, table_name)
+            if not df.empty:
+                # Rename snake_case fields back to Title Case if mapping provided
+                if column_map:
+                    df = df.rename(columns=column_map)
+                # Filter to only the columns we expect
+                clean_cols = [col for col in df.columns if col in column_map.values() or not column_map]
+                return df[clean_cols]
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ Supabase load failed for '{table_name}'. Falling back to local data. Error: {e}")
+            
+    # Fallback to local CSV
+    if local_file_name:
+        for path in (local_file_name, f"../{local_file_name}", f"data-backend/{local_file_name}", f"../data-backend/{local_file_name}"):
+            if os.path.exists(path):
+                return pd.read_csv(path, low_memory=False)
+                
+    return pd.DataFrame()
+
 # --- 2. HYBRID DATA PIPELINE (APPEND LOGIC) ---
 with st.sidebar:
     st.header("Update Data")
-    st.markdown("Base data loads from GitHub. Drop new files here to **append** to your history.")
+    st.markdown("Base data loads from Supabase. Drop new files here to **append** to your history.")
     
     dk_uploads = st.file_uploader("1. Add DistroKid Data", type="csv", accept_multiple_files=True)
     dk_freshness = st.empty() 
@@ -22,22 +158,23 @@ with st.sidebar:
     s4a_uploads = st.file_uploader("3. Add S4A Daily Tracks", type="csv", accept_multiple_files=True)
     meta_uploads = st.file_uploader("4. Add Meta Ads", type="csv", accept_multiple_files=True)
 
-# Define Base GitHub Files
-dk_base = "DistroKid Results 6.12.26.csv" if os.path.exists("DistroKid Results 6.12.26.csv") else None
-spot_base = "Spotify Campaigns to date 6.12.26.csv" if os.path.exists("Spotify Campaigns to date 6.12.26.csv") else None
+# Fetch Base Data from Supabase (with Fallbacks)
+dk_base_df = load_base_data("distrokid_royalties", "DistroKid Results 6.12.26.csv", DK_COLUMN_MAP)
+spot_base_df = load_base_data("spotify_campaign_metrics", "Spotify Campaigns to date 6.12.26.csv", SPOTIFY_COLUMN_MAP)
+s4a_base_df = load_base_data("s4a_daily_streams", None, {})
 
-if not (dk_base or dk_uploads) or not (spot_base or spot_uploads):
-    st.info("👋 Welcome! Waiting for data. Please ensure your core CSVs are uploaded to GitHub, or drop them in the sidebar.")
+if (dk_base_df.empty and not dk_uploads) or (spot_base_df.empty and not spot_uploads):
+    st.info("👋 Welcome! Waiting for data. Please ensure your Supabase database is seeded, or drop your files in the sidebar.")
     st.stop()
 
 # --- 3. DATA PROCESSING & AUTO-STITCHING ---
 @st.cache_data
-def process_data(dk_base, dk_files, spot_base, spot_files, s4a_files, meta_files):
+def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files):
     
-    def stitch_csvs(base_path, uploaded_files):
+    def stitch_data(base_df, uploaded_files):
         dfs = []
-        if base_path:
-            dfs.append(pd.read_csv(base_path, low_memory=False))
+        if not base_df.empty:
+            dfs.append(base_df)
         if uploaded_files:
             for file in uploaded_files:
                 dfs.append(pd.read_csv(file, low_memory=False))
@@ -47,11 +184,17 @@ def process_data(dk_base, dk_files, spot_base, spot_files, s4a_files, meta_files
             return combined.drop_duplicates()
         return pd.DataFrame()
 
-    dk_df = stitch_csvs(dk_base, dk_files)
-    spot_df = stitch_csvs(spot_base, spot_files)
-    meta_df = stitch_csvs(None, meta_files) 
+    dk_df = stitch_data(dk_base_df, dk_files)
+    spot_df = stitch_data(spot_base_df, spot_files)
+    meta_df = stitch_data(pd.DataFrame(), meta_files) 
     
     s4a_dataframes = []
+    if not s4a_base_df.empty:
+        # Standardize DB S4A columns
+        s4a_base_df['date'] = pd.to_datetime(s4a_base_df['date'], errors='coerce')
+        s4a_base_df['streams'] = pd.to_numeric(s4a_base_df['streams'], errors='coerce').fillna(0)
+        s4a_dataframes.append(s4a_base_df)
+        
     if s4a_files:
         for file in s4a_files:
             try:
@@ -94,7 +237,7 @@ def process_data(dk_base, dk_files, spot_base, spot_files, s4a_files, meta_files
     return dk_df, spot_df, s4a_df, meta_df
 
 with st.spinner("Stitching and processing datasets..."):
-    dk_df, spot_df, s4a_df, meta_df = process_data(dk_base, dk_uploads, spot_base, spot_uploads, s4a_uploads, meta_uploads)
+    dk_df, spot_df, s4a_df, meta_df = process_data(dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads)
 
 # --- INJECT DATA FRESHNESS CALLOUTS ---
 if not dk_df.empty:
