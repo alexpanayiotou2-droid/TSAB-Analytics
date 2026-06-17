@@ -1,0 +1,20 @@
+# DATA BACKEND SCHEMA CONTEXT
+
+These are the exact column headers from the primary CSV exports. Antigravity agents must use these exact strings to define the Supabase PostgreSQL table schema (`data-backend/supabase_schema.sql`) and map the automated ingestion scripts.
+
+## 1. DistroKid Royalty Data
+Source File Target: DistroKid Results 6.12.26.csv
+Primary Table Name: distrokid_royalties
+Expected Column Headers: 
+Reporting Date, Sale Month, Store, Artist, Title, Quantity, Track/Album, Client pro-rata, Item Price, Currency, USD Rate, Earnings (USD), ISRC, UPC, Country of Sale
+
+## 2. Spotify Campaigns Data
+Source File Target: Spotify Campaigns to date 6.12.26.csv
+Primary Table Name: spotify_campaign_metrics
+Expected Column Headers: 
+Campaign Name, Track Target, Start Date, End Date, Status, Ad Spend, Impressions, Reach, Clicks, New Listeners, Saves, Playlist Adds, Save Rate, Intent Rate
+
+## 3. Custom Derived Columns (Do Not Ingest, Calculate via SQL)
+* blended_roas
+* upfront_cpa
+* phantom_spend_flag
