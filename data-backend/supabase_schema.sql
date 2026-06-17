@@ -286,13 +286,15 @@ LEFT JOIN campaign_post_streams post ON c.campaign_name = post.campaign_name AND
 -- 4. SECURITY & ROW LEVEL SECURITY (RLS) POLICIES
 --------------------------------------------------------------------------------
 
--- 1. Enforce Row Level Security for your tables
+-- 1. Enforce Row Level Security for ALL tables (including S4A)
 ALTER TABLE distrokid_royalties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE spotify_campaign_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE s4a_daily_streams ENABLE ROW LEVEL SECURITY;
 
--- 2. CLEAR OUT OLD POLICIES IF THEY EXIST (Prevents the 42710 Error)
+-- 2. CLEAR OUT OLD POLICIES IF THEY EXIST (Idempotent Rerun Safety)
 DROP POLICY IF EXISTS "Allow read access to anon users" ON distrokid_royalties;
 DROP POLICY IF EXISTS "Allow read access to anon users" ON spotify_campaign_metrics;
+DROP POLICY IF EXISTS "Allow read access to anon users" ON s4a_daily_streams;
 
 -- 3. Create fresh read-only policies for your Streamlit frontend
 CREATE POLICY "Allow read access to anon users" 
@@ -302,5 +304,10 @@ TO anon, authenticated USING (true);
 CREATE POLICY "Allow read access to anon users" 
 ON spotify_campaign_metrics FOR SELECT 
 TO anon, authenticated USING (true);
+
+CREATE POLICY "Allow read access to anon users" 
+ON s4a_daily_streams FOR SELECT 
+TO anon, authenticated USING (true);
+
 
 
