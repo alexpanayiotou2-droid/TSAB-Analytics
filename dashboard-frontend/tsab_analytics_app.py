@@ -29,6 +29,85 @@ def load_env():
 
 load_env()
 
+# --- BRANDING LAYOUT HOOKS & CUSTOM CSS ---
+frontend_dir = os.path.dirname(os.path.abspath(__file__))
+logo_path = os.path.join(frontend_dir, "assets", "Bird solo.png")
+wordmark_path = os.path.join(frontend_dir, "assets", "SA_Fill_Black.png")
+
+with st.sidebar:
+    # Anchor branding block in a container
+    brand_container = st.container()
+    with brand_container:
+        col_logo_left, col_logo_mid, col_logo_right = st.columns([1, 2, 1])
+        with col_logo_mid:
+            if os.path.exists(logo_path):
+                st.image(logo_path, use_container_width=True)
+        
+        if os.path.exists(wordmark_path):
+            st.image(wordmark_path, use_container_width=True, output_format="PNG")
+    
+    st.markdown("---") # Visual separator
+
+st.markdown(
+    """
+    <style>
+    /* Invert the black typographic logo to white for dark-mode visibility */
+    img[alt*="SA_Fill_Black"], img[src*="SA_Fill_Black"] {
+        filter: invert(1) brightness(1.2);
+        max-height: 55px;
+        object-fit: contain;
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+        padding-bottom: 15px;
+    }
+    
+    /* Center the Bird Solo image and add hover micro-animation */
+    img[alt*="Bird solo"], img[src*="Bird solo"] {
+        max-height: 90px;
+        object-fit: contain;
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+        transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    img[alt*="Bird solo"]:hover {
+        transform: rotate(5deg) scale(1.05);
+    }
+    
+    /* Make metric cards feel premium with subtle amber indicator bars */
+    div[data-testid="stMetric"] {
+        background-color: #161920;
+        border-radius: 12px;
+        padding: 20px 24px;
+        border-top: 3px solid #FBAD30;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        transition: all 0.25s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(251, 173, 48, 0.15);
+    }
+    
+    /* Align metrics header spacing */
+    div[data-testid="stMetric"] label {
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #AEB5C5 !important;
+        font-size: 0.75rem !important;
+    }
+    
+    /* Customize sidebar styles */
+    section[data-testid="stSidebar"] {
+        background-color: #0B0D13 !important;
+        border-right: 1px solid #1E222F;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # Predefined Column Maps to rename database snake_case back to Title Case expected by frontend
 DK_COLUMN_MAP = {
     'date_inserted': 'Date Inserted',
@@ -470,17 +549,17 @@ def render_metric(col, label, value, delta_val, formatting_str, help_text=None, 
 
 if selected_view == "All Catalog (Aggregate)":
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-    render_metric(col_kpi1, "💰 Blended ROAS", f"{roas_current:.2f}x", d_roas, ".2f", help_text="Total Royalty Earnings / Total Upfront Ad Spend")
-    render_metric(col_kpi2, "🎯 Upfront CPA", f"${cpa_current:.2f}", d_cpa, ".2f", help_text="Total Upfront Spend / Converted Listeners", is_inverse=True)
-    render_metric(col_kpi3, "❤️ Avg. Save Rate", f"{save_current:.1f}%", d_save, ".1f", help_text="Average Save Rate across all Spotify Campaigns")
+    render_metric(col_kpi1, "💰 Blended ROAS", f"{roas_current:.2f}x", d_roas, ".2f", help_text="Blended Return on Ad Spend. Calculated as: Total Royalty Earnings / Total Ad Spend (Spotify + Meta).")
+    render_metric(col_kpi2, "🎯 Upfront CPA", f"${cpa_current:.2f}", d_cpa, ".2f", help_text="Upfront Cost per Acquisition. Calculated as: Total Ad Spend / Converted Listeners on Spotify.", is_inverse=True)
+    render_metric(col_kpi3, "❤️ Avg. Save Rate", f"{save_current:.1f}%", d_save, ".1f", help_text="The average campaign save rate. Rates above 10% indicate high listener intent and signal potential algorithmic recommendation uplift.")
     render_metric(col_kpi4, "🎧 Total Streams", f"{streams_current:,.0f}", d_streams, ",.0f", help_text="Total Streams across all platforms within timeframe")
 else:
     col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_kpi5 = st.columns(5)
-    render_metric(col_kpi1, "💰 Blended ROAS", f"{roas_current:.2f}x", d_roas, ".2f", help_text="Total Royalty Earnings / Total Upfront Ad Spend")
-    render_metric(col_kpi2, "🎯 Upfront CPA", f"${cpa_current:.2f}", d_cpa, ".2f", help_text="Total Upfront Spend / Converted Listeners", is_inverse=True)
+    render_metric(col_kpi1, "💰 Blended ROAS", f"{roas_current:.2f}x", d_roas, ".2f", help_text="Blended Return on Ad Spend. Calculated as: Total Royalty Earnings / Total Ad Spend (Spotify + Meta).")
+    render_metric(col_kpi2, "🎯 Upfront CPA", f"${cpa_current:.2f}", d_cpa, ".2f", help_text="Upfront Cost per Acquisition. Calculated as: Total Ad Spend / Converted Listeners on Spotify.", is_inverse=True)
     # Phantom spend directly implemented with tooltip:
-    col_kpi3.metric("👻 Phantom Spend", f"${phantom_spend:.2f}", help="Cumulative royalties sacrificed to Discovery Mode for this track")
-    render_metric(col_kpi4, "❤️ Avg. Save Rate", f"{save_current:.1f}%", d_save, ".1f", help_text="Average Save Rate across all Spotify Campaigns")
+    col_kpi3.metric("👻 Phantom Spend", f"${phantom_spend:.2f}", help="Algorithmic royalty discount. Represents the estimated value of royalties sacrificed in Discovery Mode to secure organic algorithmic streams.")
+    render_metric(col_kpi4, "❤️ Avg. Save Rate", f"{save_current:.1f}%", d_save, ".1f", help_text="The average campaign save rate. Rates above 10% indicate high listener intent and signal potential algorithmic recommendation uplift.")
     render_metric(col_kpi5, "🎧 Total Streams", f"{streams_current:,.0f}", d_streams, ",.0f", help_text="Total Streams across all platforms within timeframe")
 
 st.divider()
@@ -517,7 +596,7 @@ with col_v2:
                 alt.Chart(store_streams).mark_bar().encode(
                     x=alt.X('Quantity:Q', title='Total Streams'),
                     y=alt.Y('Store:N', sort='-x', title=''),
-                    color=alt.Color('Store:N', legend=None)
+                    color=alt.value('#FBAD30')
                 ),
                 use_container_width=True
             )
