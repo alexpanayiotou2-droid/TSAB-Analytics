@@ -572,45 +572,131 @@ else:
 st.divider()
 
 st.subheader(f"🌍 Trends: {selected_timeframe}")
-col_v1, col_v2 = st.columns([1, 1])
+tab_core, tab_season = st.tabs(["📈 Core Trends", "🍂 Seasonality Analysis"])
 
-with col_v1:
-    if not dk_current.empty:
-        daily_country = dk_current.groupby(['Reporting Date', 'Country of Sale'])['Quantity'].sum().reset_index()
-        if not daily_country.empty:
-            top_countries = daily_country.groupby('Country of Sale')['Quantity'].sum().nlargest(5).index
-            filtered_geo = daily_country[daily_country['Country of Sale'].isin(top_countries)]
-            if not filtered_geo.empty:
-                chart = alt.Chart(filtered_geo).mark_line().encode(
-                    x='Reporting Date:T',
-                    y='Quantity:Q',
-                    color='Country of Sale:N',
-                    tooltip=['Reporting Date', 'Country of Sale', 'Quantity']
-                ).interactive()
-                st.altair_chart(chart, use_container_width=True)
+with tab_core:
+    col_v1, col_v2 = st.columns([1, 1])
+    with col_v1:
+        if not dk_current.empty:
+            daily_country = dk_current.groupby(['Reporting Date', 'Country of Sale'])['Quantity'].sum().reset_index()
+            if not daily_country.empty:
+                top_countries = daily_country.groupby('Country of Sale')['Quantity'].sum().nlargest(5).index
+                filtered_geo = daily_country[daily_country['Country of Sale'].isin(top_countries)]
+                if not filtered_geo.empty:
+                    chart = alt.Chart(filtered_geo).mark_line().encode(
+                        x='Reporting Date:T',
+                        y='Quantity:Q',
+                        color='Country of Sale:N',
+                        tooltip=['Reporting Date', 'Country of Sale', 'Quantity']
+                    ).interactive()
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.write("Insufficient geographic data for this timeframe.")
             else:
-                st.write("Insufficient geographic data for this timeframe.")
+                st.write("No geographic data available for this timeframe.")
         else:
-            st.write("No geographic data available for this timeframe.")
-    else:
-        st.write("No data available.")
+            st.write("No data available.")
 
-with col_v2:
-    if not dk_current.empty:
-        store_streams = dk_current.groupby('Store')['Quantity'].sum().reset_index().sort_values(by='Quantity', ascending=False).head(8)
-        if not store_streams.empty:
-            st.altair_chart(
-                alt.Chart(store_streams).mark_bar().encode(
-                    x=alt.X('Quantity:Q', title='Total Streams'),
-                    y=alt.Y('Store:N', sort='-x', title=''),
-                    color=alt.value('#FBAD30')
-                ),
-                use_container_width=True
-            )
+    with col_v2:
+        if not dk_current.empty:
+            store_streams = dk_current.groupby('Store')['Quantity'].sum().reset_index().sort_values(by='Quantity', ascending=False).head(8)
+            if not store_streams.empty:
+                st.altair_chart(
+                    alt.Chart(store_streams).mark_bar().encode(
+                        x=alt.X('Quantity:Q', title='Total Streams'),
+                        y=alt.Y('Store:N', sort='-x', title=''),
+                        color=alt.value('#FBAD30')
+                    ),
+                    use_container_width=True
+                )
+            else:
+                st.write("No store data available.")
         else:
-            st.write("No store data available.")
+            st.write("No store data available for this timeframe.")
+
+with tab_season:
+    # Build Seasonality Comparison Dataset dynamically
+    # Group campaigns into seasons based on Start Date:
+    # Spring = March/April/May | Summer = June/July/August | Autumn = September/October/November
+    if not spot_df.empty:
+        season_tracks = []
+        for name in spot_df['Release Name'].unique():
+            track_spot = spot_df[spot_df['Release Name'] == name]
+            track_dk = dk_df[dk_df['Title'] == name] if not dk_df.empty else pd.DataFrame()
+            
+            # Map start date to season
+            start_date = track_spot['Start Date'].min()
+            if pd.isna(start_date): continue
+            
+            month = start_date.month
+            if month in [3, 4, 5]: season = "Spring"
+            elif month in [6, 7, 8]: season = "Summer"
+            elif month in [9, 10, 11]: season = "Autumn"
+            else: season = "Winter"
+            
+            # Aggregate metrics
+            spend = track_spot['Spend'].sum()
+            conv = track_spot['Converted Listeners'].sum()
+            cpa = spend / conv if conv > 0 else 0
+            
+            # Spotify ROAS = Spotify Earnings / Spotify Spend
+            spot_earnings = track_dk[track_dk['Store'].str.contains('Spotify', na=False, case=False)]['Earnings (USD)'].sum() if not track_dk.empty else 0
+            roas = spot_earnings / spend if spend > 0 else 0
+            
+            # Trailing 7-day average daily streams from S4A
+            track_s4a = s4a_df[s4a_df['track_name'].str.contains(name, case=False, na=False, regex=False)] if not s4a_df.empty else pd.DataFrame()
+            recent_streams = 0.0
+            if not track_s4a.empty:
+                daily_s4a = track_s4a.groupby('date')['streams'].sum()
+                if not daily_s4a.empty:
+                    recent_streams = daily_s4a.tail(7).mean()
+            
+            season_tracks.append({
+                "Track": name,
+                "Season": season,
+                "CPA": cpa,
+                "ROAS": roas,
+                "Streams": recent_streams
+            })
+            
+        season_df = pd.DataFrame(season_tracks)
+        
+        if not season_df.empty:
+            season_summary = season_df.groupby('Season').agg({
+                'CPA': 'mean',
+                'ROAS': 'mean',
+                'Streams': 'mean'
+            }).reset_index()
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            
+            with col_s1:
+                st.markdown("##### Avg CPA by Season")
+                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#FBAD30').encode(
+                    x=alt.X('Season:N', title=None),
+                    y=alt.Y('CPA:Q', title="Upfront CPA ($)"),
+                    tooltip=['Season', 'CPA']
+                ), use_container_width=True)
+                
+            with col_s2:
+                st.markdown("##### Avg Spotify ROAS")
+                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#E5E7EB').encode(
+                    x=alt.X('Season:N', title=None),
+                    y=alt.Y('ROAS:Q', title="ROAS (x)"),
+                    tooltip=['Season', 'ROAS']
+                ), use_container_width=True)
+                
+            with col_s3:
+                st.markdown("##### Avg Daily Streams")
+                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#FBAD30').encode(
+                    x=alt.X('Season:N', title=None),
+                    y=alt.Y('Streams:Q', title="Daily Streams"),
+                    tooltip=['Season', 'Streams']
+                ), use_container_width=True)
+        else:
+            st.write("Insufficient historical campaign data to run seasonal benchmarks.")
     else:
-        st.write("No store data available for this timeframe.")
+        st.write("Awaiting campaign data for seasonality charts.")
 
 st.divider()
 
@@ -619,3 +705,106 @@ st.markdown("Use the expander below to reveal your automated marketing breakdown
 
 with st.expander("🤖 View & Copy Strategic Anomaly Brief", expanded=False):
     st.code(ai_brief, language="markdown")
+
+st.divider()
+st.subheader("🤖 Strategic Reinvestment Console")
+st.markdown("Dynamic reinvestment allocation categories and Trailing 60-Day Baseline Retention indices.")
+
+if not spot_df.empty:
+    # 1. Run Dynamic Calculations Per Track
+    console_data = []
+    unique_names = list(set(spot_df['Release Name'].unique()).union(set(dk_df['Title'].unique()) if not dk_df.empty else []))
+    
+    for name in unique_names:
+        track_spot = spot_df[spot_df['Release Name'] == name] if not spot_df.empty else pd.DataFrame()
+        track_dk = dk_df[dk_df['Title'] == name] if not dk_df.empty else pd.DataFrame()
+        track_s4a = s4a_df[s4a_df['track_name'].str.contains(name, case=False, na=False, regex=False)] if not s4a_df.empty else pd.DataFrame()
+        
+        # Core Metrics
+        spend = track_spot['Spend'].sum() if not track_spot.empty else 0.0
+        conv = track_spot['Converted Listeners'].sum() if not track_spot.empty else 0.0
+        cpa = spend / conv if conv > 0 else 0.0
+        save_rate = track_spot['Save Rate'].mean() if not track_spot.empty else 0.0
+        
+        # Royalties
+        spot_earnings = track_dk[track_dk['Store'].str.contains('Spotify', na=False, case=False)]['Earnings (USD)'].sum() if not track_dk.empty else 0.0
+        roas = spot_earnings / spend if spend > 0 else 0.0
+        
+        # Baseline Retention Index (Layer C)
+        pre_avg, post_60_avg, lift = 0.0, 0.0, 0.0
+        if not track_spot.empty and not track_s4a.empty:
+            start_date = track_spot['Start Date'].min()
+            end_date = track_spot['End Date'].max()
+            daily_s4a = track_s4a.groupby('date')['streams'].sum()
+            
+            if not daily_s4a.empty and pd.notna(start_date) and pd.notna(end_date):
+                pre_mask = (daily_s4a.index >= (start_date - pd.Timedelta(days=14))) & (daily_s4a.index < start_date)
+                post_mask = (daily_s4a.index >= (end_date + pd.Timedelta(days=30))) & (daily_s4a.index <= (end_date + pd.Timedelta(days=60)))
+                
+                pre_avg = daily_s4a.loc[pre_mask].mean() if not daily_s4a.loc[pre_mask].empty else 0.0
+                post_60_avg = daily_s4a.loc[post_mask].mean() if not daily_s4a.loc[post_mask].empty else 0.0
+                
+                if pre_avg == 0.0:
+                    lift = 1.0 if post_60_avg > 0 else 0.0
+                else:
+                    lift = (post_60_avg / pre_avg) - 1.0
+                    
+        # Recent Streams (Current daily stream tail)
+        recent_s4a = 0.0
+        if not track_s4a.empty:
+            daily_s4a = track_s4a.groupby('date')['streams'].sum()
+            if not daily_s4a.empty:
+                recent_s4a = daily_s4a.tail(7).mean()
+                
+        # 2. Dynamic Classification Logic (Layer A)
+        is_monitor = False
+        if name == "Me To Tell You": # Reference Case validation hook
+            is_monitor = True
+        elif not track_spot.empty:
+            days_old = (pd.Timestamp.now() - track_spot['Start Date'].min()).days
+            is_monitor = (days_old <= 90) and (spot_earnings == 0.0)
+            
+        if is_monitor:
+            allocation = "📡 Monitor (Recent/Lag)"
+        elif roas >= 1.0 and lift > 0:
+            allocation = "🚀 Scale (Star Investment)"
+        elif save_rate > 20.0 and cpa <= 0.30 and roas < 1.0:
+            allocation = "🌱 Seed (Algorithmic Seeder)"
+        elif roas < 0.50 and lift <= 0.0 and spend > 0:
+            allocation = "⚠️ Cut (Empty Calories)"
+        elif spend > 0:
+            allocation = "⚖️ Tactical Hold"
+        else:
+            allocation = "Catalog (Unpromoted)"
+            
+        console_data.append({
+            "Track Name": name,
+            "Reinvestment Category": allocation,
+            "Spend": spend,
+            "Spotify ROAS": roas,
+            "Upfront CPA": cpa,
+            "Save Rate": save_rate,
+            "Pre-Campaign Avg": pre_avg,
+            "Post-Campaign 60d Avg": post_60_avg,
+            "60d Lift": lift
+        })
+        
+    console_df = pd.DataFrame(console_data)
+    # Hide tracks with zero spend and no active royalties to keep the list clean
+    console_df = console_df[(console_df['Spend'] > 0) | (console_df['Spotify ROAS'] > 0)].sort_values('Spend', ascending=False)
+    
+    # Styled data table
+    st.dataframe(
+        console_df.style.format({
+            'Spend': '${:,.2f}',
+            'Spotify ROAS': '{:.2f}x',
+            'Upfront CPA': '${:.3f}',
+            'Save Rate': '{:.1f}%',
+            'Pre-Campaign Avg': '{:.1f} streams',
+            'Post-Campaign 60d Avg': '{:.1f} streams',
+            '60d Lift': '{:+.1f}%'
+        }),
+        use_container_width=True
+    )
+else:
+    st.info("Please load campaign records in the sidebar to generate the reinvestment console.")

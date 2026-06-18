@@ -7,3 +7,6 @@ __pycache__/
 
 # OS metadata
 .DS_Store
+
+# Local Agent Context (Ignored from Git)
+context/strategy/
