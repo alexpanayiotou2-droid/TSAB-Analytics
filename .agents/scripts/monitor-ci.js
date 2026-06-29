@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 
 try {
   const remoteUrl = execSync('git remote get-url origin').toString().trim();
-  const match = remoteUrl.match(/github\.com[:/](.+?)\.git$/);
+  const match = remoteUrl.match(/github\.com[:/](.+?)(?:\.git)?$/);
   if (!match) throw new Error('Could not parse GitHub repo from remote URL');
   const repo = match[1];
 
