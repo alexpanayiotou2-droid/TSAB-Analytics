@@ -185,6 +185,15 @@ track_campaigns AS (
     FROM spotify_campaign_metrics
     GROUP BY release_name
 ),
+track_submithub AS (
+    SELECT 
+        song AS track_name,
+        SUM(cost_usd) AS submithub_spend_usd,
+        COUNT(CASE WHEN action = 'Approved' THEN 1 END) AS submithub_approvals,
+        SUM(estimated_reach) AS submithub_reach
+    FROM submithub_submissions
+    GROUP BY song
+),
 track_phantom AS (
     SELECT 
         track_name,
@@ -194,32 +203,34 @@ track_phantom AS (
     GROUP BY track_name
 )
 SELECT
-    COALESCE(r.track_name, c.track_name) AS track_name,
+    COALESCE(r.track_name, c.track_name, s.track_name) AS track_name,
     COALESCE(r.total_earnings_usd, 0.0) AS total_earnings_usd,
     COALESCE(r.total_streams, 0) AS total_streams,
-    COALESCE(c.total_spend_usd, 0.0) AS total_spend_usd,
-    COALESCE(c.total_converted_listeners, 0) AS total_converted_listeners,
+    (COALESCE(c.total_spend_usd, 0.0) + COALESCE(s.submithub_spend_usd, 0.0)) AS total_spend_usd,
+    (COALESCE(c.total_converted_listeners, 0) + COALESCE(s.submithub_approvals, 0)) AS total_converted_listeners,
     COALESCE(c.total_saves, 0) AS total_saves,
     COALESCE(c.avg_save_rate, 0.0) AS avg_save_rate,
     COALESCE(c.avg_intent_rate, 0.0) AS avg_intent_rate,
-    -- Derived: Blended ROAS (Royalties / Ad Spend)
+    -- Derived: Blended ROAS (Royalties / Blended Spend)
     CASE 
-        WHEN COALESCE(c.total_spend_usd, 0.0) > 0 
-        THEN COALESCE(r.total_earnings_usd, 0.0) / c.total_spend_usd
+        WHEN (COALESCE(c.total_spend_usd, 0.0) + COALESCE(s.submithub_spend_usd, 0.0)) > 0 
+        THEN COALESCE(r.total_earnings_usd, 0.0) / (COALESCE(c.total_spend_usd, 0.0) + COALESCE(s.submithub_spend_usd, 0.0))
         ELSE 0.0
     END AS blended_roas,
-    -- Derived: Upfront CPA (Ad Spend / Converted Listeners)
+    -- Derived: Upfront CPA (Blended Spend / Blended Conversions)
     CASE 
-        WHEN COALESCE(c.total_converted_listeners, 0) > 0 
-        THEN COALESCE(c.total_spend_usd, 0.0) / c.total_converted_listeners
+        WHEN (COALESCE(c.total_converted_listeners, 0) + COALESCE(s.submithub_approvals, 0)) > 0 
+        THEN (COALESCE(c.total_spend_usd, 0.0) + COALESCE(s.submithub_spend_usd, 0.0)) / (COALESCE(c.total_converted_listeners, 0) + COALESCE(s.submithub_approvals, 0))
         ELSE 0.0
     END AS upfront_cpa,
     -- Derived: Phantom Spend Details
     COALESCE(p.total_phantom_spend, 0.0) AS phantom_spend,
-    COALESCE(p.has_phantom_spend_flag, FALSE) AS phantom_spend_flag
+    COALESCE(p.has_phantom_spend_flag, FALSE) AS phantom_spend_flag,
+    COALESCE(s.submithub_reach, 0) AS submithub_reach
 FROM track_royalties r
 FULL OUTER JOIN track_campaigns c ON r.track_name = c.track_name
-LEFT JOIN track_phantom p ON COALESCE(r.track_name, c.track_name) = p.track_name;
+FULL OUTER JOIN track_submithub s ON COALESCE(r.track_name, c.track_name) = s.track_name
+LEFT JOIN track_phantom p ON COALESCE(r.track_name, c.track_name, s.track_name) = p.track_name;
 
 -- View: v_campaign_retention_decay
 -- Tracks 14-day pre/post campaign stream changes to measure baseline organic lift and retention health.
