@@ -5,6 +5,7 @@ import os
 import json
 import urllib.request
 import ssl
+import re
 
 # --- 1. SETUP & CONFIG & BRAND PATHS ---
 import os
@@ -236,26 +237,134 @@ with st.sidebar:
     st.markdown("Base data loads from Supabase. Drop new files here to **append** to your history.")
     
     dk_uploads = st.file_uploader("1. Add DistroKid Data", type="csv", accept_multiple_files=True)
+    st.caption("📂 *Expects: DistroKid royalty CSV reports (e.g., DistroKid Results 6.12.26.csv)*")
     dk_freshness = st.empty() 
     
     spot_uploads = st.file_uploader("2. Add Spotify Campaigns", type="csv", accept_multiple_files=True)
+    st.caption("📂 *Expects: Spotify Ad Studio campaign report CSVs (e.g., Spotify Campaigns to date 6.12.26.csv)*")
     spot_freshness = st.empty() 
     
     s4a_uploads = st.file_uploader("3. Add S4A Daily Tracks", type="csv", accept_multiple_files=True)
+    st.caption("📂 *Expects: S4A daily stream timeline CSVs (e.g., Astronaut-timeline.csv)*")
+    
     meta_uploads = st.file_uploader("4. Add Meta Ads", type="csv", accept_multiple_files=True)
+    st.caption("📂 *Expects: Meta Ads CSV reports with columns 'Start Date' and 'Amount Spent (USD)'*")
+
+    submithub_uploads = st.file_uploader("5. Add SubmitHub Data", type=["txt", "csv"], accept_multiple_files=True)
+    st.caption("📂 *Expects: Copy-pasted response page text files (e.g., Faire Enough Response page text.txt) or custom CSVs*")
+
 
 # Fetch Base Data from Supabase (with Fallbacks)
 dk_base_df = load_base_data("distrokid_royalties", "DistroKid Results 6.12.26.csv", DK_COLUMN_MAP)
 spot_base_df = load_base_data("spotify_campaign_metrics", "Spotify Campaigns to date 6.12.26.csv", SPOTIFY_COLUMN_MAP)
 s4a_base_df = load_base_data("s4a_daily_streams", None, {})
+submithub_base_df = load_base_data("submithub_submissions", None, {})
+
 
 if (dk_base_df.empty and not dk_uploads) or (spot_base_df.empty and not spot_uploads):
     st.info("👋 Welcome! Waiting for data. Please ensure your Supabase database is seeded, or drop your files in the sidebar.")
     st.stop()
 
 # --- 3. DATA PROCESSING & AUTO-STITCHING ---
+def parse_raw_text_content(content, song_name):
+    lines = [line.strip() for line in content.split('\n')]
+    curators = []
+    header_pattern = re.compile(
+        r'^(.+?)(Blog|Spotify Playlister|Radio|YouTube Channel|TikToker|Instagrammer|Record Label|Playlister|Influencer)(.*)$', 
+        re.IGNORECASE
+    )
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if '|Add a note' in line:
+            raw_header = line.split('|')[0].strip()
+            match = header_pattern.match(raw_header)
+            if match:
+                curator_name = match.group(1).strip()
+                curator_type = match.group(2).strip()
+            else:
+                curator_name = raw_header
+                curator_type = 'Unknown'
+            
+            i += 1
+            credit_line = lines[i] if i < len(lines) else ''
+            credits = 0
+            credit_type = 'Premium'
+            
+            credit_match = re.search(r'(\d+)\s+credit[s]?\s+\((Premium|Standard)\)', credit_line, re.IGNORECASE)
+            if credit_match:
+                credits = int(credit_match.group(1))
+                credit_type = credit_match.group(2)
+            
+            current_curator = {
+                'song': song_name,
+                'outlet': curator_name,
+                'outlet_type': curator_type,
+                'credits_spent': credits,
+                'credit_type': credit_type,
+                'status': 'Pending',
+                'feedback': '',
+                'is_refunded': False,
+                'cost_usd': 0.0,
+                'share_destination': '',
+                'estimated_reach': None
+            }
+            
+            i += 1
+            detail_lines = []
+            while i < len(lines) and '|Add a note' not in lines[i]:
+                detail_lines.append(lines[i])
+                i += 1
+            
+            details_str = " ".join(detail_lines)
+            if 'Refunded' in details_str or 'Expired' in details_str:
+                current_curator['is_refunded'] = True
+                current_curator['status'] = 'Refunded'
+            elif 'Declined' in details_str:
+                current_curator['status'] = 'Declined'
+            elif 'Approved' in details_str:
+                current_curator['status'] = 'Approved'
+                
+            feedback_candidates = []
+            for dl in detail_lines:
+                dl_clean = dl.strip()
+                if any(x in dl_clean for x in ['Listened', 'Declined', 'Approved', 'Refunded', 'Expired', 'Translate', 'Specific enough', 'Could be better', 'To be shared:', 'in a Spotify', 'Shared', 'Manage', 'Review your experience']):
+                    continue
+                if re.match(r'^\d+\s+(year|month|day|week|hour|minute)s?\s+ago', dl_clean, re.IGNORECASE):
+                    continue
+                if '(Your rating will be kept anonymous)' in dl_clean:
+                    continue
+                if not dl_clean:
+                    continue
+                if re.search(r'\(\d+,?\d*\s+followers\s*\|', dl_clean, re.IGNORECASE):
+                    continue
+                if len(dl_clean) > 5:
+                    feedback_candidates.append(dl_clean)
+            
+            if feedback_candidates:
+                current_curator['feedback'] = " ".join(feedback_candidates)
+                
+            if current_curator['status'] == 'Approved':
+                for dl in detail_lines:
+                    if 'followers' in dl and '|' in dl:
+                        current_curator['share_destination'] = dl.strip()
+                        reach_match = re.search(r'\((\d{1,3}(?:,\d{3})*)\s+followers', dl, re.IGNORECASE)
+                        if reach_match:
+                            current_curator['estimated_reach'] = int(reach_match.group(1).replace(',', ''))
+            
+            if current_curator['is_refunded']:
+                current_curator['cost_usd'] = 0.0
+            else:
+                current_curator['cost_usd'] = round(credits * 0.85, 2)
+                
+            curators.append(current_curator)
+            i -= 1
+        i += 1
+    return curators
+
 @st.cache_data
-def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files):
+def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files, submithub_base_df, submithub_files):
     
     def stitch_data(base_df, uploaded_files):
         dfs = []
@@ -300,6 +409,37 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         s4a_df = pd.concat(s4a_dataframes, ignore_index=True).drop_duplicates()
     else:
         s4a_df = pd.DataFrame(columns=['date', 'streams', 'track_name'])
+        
+    submithub_dataframes = []
+    if not submithub_base_df.empty:
+        submithub_base_df['cost_usd'] = pd.to_numeric(submithub_base_df['cost_usd'], errors='coerce').fillna(0)
+        submithub_base_df['credits_spent'] = pd.to_numeric(submithub_base_df['credits_spent'], errors='coerce').fillna(0)
+        submithub_base_df['estimated_reach'] = pd.to_numeric(submithub_base_df['estimated_reach'], errors='coerce')
+        submithub_dataframes.append(submithub_base_df)
+        
+    if submithub_files:
+        for file in submithub_files:
+            if file.name.endswith('.csv'):
+                try:
+                    df = pd.read_csv(file)
+                    submithub_dataframes.append(df)
+                except Exception:
+                    pass
+            elif file.name.endswith('.txt') or 'text' in file.name.lower():
+                try:
+                    content = file.getvalue().decode('utf-8', errors='ignore')
+                    song_name = file.name.replace(' response page text.txt', '').replace(' Response page text.txt', '').replace(' response page text', '').replace('.txt', '').strip()
+                    parsed = parse_raw_text_content(content, song_name)
+                    df = pd.DataFrame(parsed)
+                    if not df.empty:
+                        submithub_dataframes.append(df)
+                except Exception as e:
+                    pass
+                    
+    if submithub_dataframes:
+        submithub_df = pd.concat(submithub_dataframes, ignore_index=True).drop_duplicates(subset=['song', 'outlet'])
+    else:
+        submithub_df = pd.DataFrame(columns=['song', 'outlet', 'outlet_type', 'credits_spent', 'credit_type', 'status', 'feedback', 'is_refunded', 'cost_usd', 'estimated_reach'])
     
     if not meta_df.empty:
         meta_df['Start Date'] = pd.to_datetime(meta_df['Start Date'], errors='coerce')
@@ -320,10 +460,11 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         spot_df['Save Rate'] = pd.to_numeric(spot_df['Save Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
         spot_df['Intent Rate'] = pd.to_numeric(spot_df['Intent Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
     
-    return dk_df, spot_df, s4a_df, meta_df
+    return dk_df, spot_df, s4a_df, meta_df, submithub_df
 
 with st.spinner("Stitching and processing datasets..."):
-    dk_df, spot_df, s4a_df, meta_df = process_data(dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads)
+    dk_df, spot_df, s4a_df, meta_df, submithub_df = process_data(dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads, submithub_base_df, submithub_uploads)
+
 
 # --- INJECT DATA FRESHNESS CALLOUTS ---
 if not dk_df.empty:
@@ -355,6 +496,8 @@ if selected_view != "All Catalog (Aggregate)":
     dk_df = dk_df[dk_df['Title'] == selected_view] if not dk_df.empty else dk_df
     spot_df = spot_df[spot_df['Release Name'] == selected_view] if not spot_df.empty else spot_df
     s4a_df = s4a_df[s4a_df['track_name'].str.contains(selected_view, case=False, na=False, regex=False)] if not s4a_df.empty else s4a_df
+    submithub_df = submithub_df[submithub_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not submithub_df.empty else submithub_df
+
 
 # --- 4. AUTOMATED EDA LOGIC ---
 def generate_ai_brief(dk_df, spot_df, s4a_df, meta_df):
@@ -501,40 +644,53 @@ st.subheader(f"📊 The Vitals: {view_title}")
 dk_anchor = dk_df['Reporting Date'].max() if not dk_df.empty else pd.Timestamp.now()
 spot_anchor = spot_df['End Date'].max() if not spot_df.empty else pd.Timestamp.now()
 meta_anchor = meta_df['Start Date'].max() if not meta_df.empty else pd.Timestamp.now()
+submithub_anchor = pd.to_datetime(submithub_df['campaign_date'], errors='coerce').max() if not submithub_df.empty else pd.Timestamp.now()
+
+# Standardize date formats in submithub_df
+if not submithub_df.empty:
+    submithub_df['campaign_date'] = pd.to_datetime(submithub_df['campaign_date'], errors='coerce')
+    submithub_df['cost_usd'] = pd.to_numeric(submithub_df['cost_usd'], errors='coerce').fillna(0)
 
 if days_lookback:
     dk_current = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback)) & (dk_df['Reporting Date'] <= dk_anchor)] if not dk_df.empty else dk_df
     spot_current = spot_df[(spot_df['End Date'] > spot_anchor - pd.Timedelta(days=days_lookback)) & (spot_df['End Date'] <= spot_anchor)] if not spot_df.empty else spot_df
     meta_current = meta_df[(meta_df['Start Date'] > meta_anchor - pd.Timedelta(days=days_lookback)) & (meta_df['Start Date'] <= meta_anchor)] if not meta_df.empty else meta_df
+    submithub_current = submithub_df[(submithub_df['campaign_date'] > submithub_anchor - pd.Timedelta(days=days_lookback)) & (submithub_df['campaign_date'] <= submithub_anchor)] if not submithub_df.empty else submithub_df
     
     dk_prior = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback*2)) & (dk_df['Reporting Date'] <= dk_anchor - pd.Timedelta(days=days_lookback))] if not dk_df.empty else dk_df
     spot_prior = spot_df[(spot_df['End Date'] > spot_anchor - pd.Timedelta(days=days_lookback*2)) & (spot_df['End Date'] <= spot_anchor - pd.Timedelta(days=days_lookback))] if not spot_df.empty else spot_df
     meta_prior = meta_df[(meta_df['Start Date'] > meta_anchor - pd.Timedelta(days=days_lookback*2)) & (meta_df['Start Date'] <= meta_anchor - pd.Timedelta(days=days_lookback))] if not meta_df.empty else meta_df
+    submithub_prior = submithub_df[(submithub_df['campaign_date'] > submithub_anchor - pd.Timedelta(days=days_lookback*2)) & (submithub_df['campaign_date'] <= submithub_anchor - pd.Timedelta(days=days_lookback))] if not submithub_df.empty else submithub_df
 else:
     dk_current = dk_df
     spot_current = spot_df
     meta_current = meta_df
+    submithub_current = submithub_df
     dk_prior = pd.DataFrame(columns=dk_df.columns if not dk_df.empty else [])
     spot_prior = pd.DataFrame(columns=spot_df.columns if not spot_df.empty else [])
     meta_prior = pd.DataFrame(columns=meta_df.columns if not meta_df.empty else [])
+    submithub_prior = pd.DataFrame(columns=submithub_df.columns if not submithub_df.empty else [])
 
-spend_current = (spot_current['Spend'].sum() if not spot_current.empty else 0) + (meta_current['Amount Spent (USD)'].sum() if not meta_current.empty else 0)
+# Compute Blended Spend: Spotify + Meta + SubmitHub
+spend_current = (spot_current['Spend'].sum() if not spot_current.empty else 0) + (meta_current['Amount Spent (USD)'].sum() if not meta_current.empty else 0) + (submithub_current['cost_usd'].sum() if not submithub_current.empty else 0)
 earn_current = dk_current['Earnings (USD)'].sum() if not dk_current.empty else 0
-conv_current = spot_current['Converted Listeners'].sum() if not spot_current.empty else 0
+# Compute Blended Conversions: Spotify converted listeners + SubmitHub approvals
+conv_current = (spot_current['Converted Listeners'].sum() if not spot_current.empty else 0) + (submithub_current[submithub_current['action'] == 'Approved'].shape[0] if not submithub_current.empty else 0)
 streams_current = dk_current['Quantity'].sum() if not dk_current.empty else 0
 save_current = spot_current['Save Rate'].mean() if not spot_current.empty else 0
 
 roas_current = (earn_current / spend_current) if spend_current > 0 else 0
 cpa_current = (spend_current / conv_current) if conv_current > 0 else 0
 
-spend_prior = (spot_prior['Spend'].sum() if not spot_prior.empty and 'Spend' in spot_prior.columns else 0) + (meta_prior['Amount Spent (USD)'].sum() if not meta_prior.empty and 'Amount Spent (USD)' in meta_prior.columns else 0)
+spend_prior = (spot_prior['Spend'].sum() if not spot_prior.empty and 'Spend' in spot_prior.columns else 0) + (meta_prior['Amount Spent (USD)'].sum() if not meta_prior.empty and 'Amount Spent (USD)' in meta_prior.columns else 0) + (submithub_prior['cost_usd'].sum() if not submithub_prior.empty and 'cost_usd' in submithub_prior.columns else 0)
 earn_prior = dk_prior['Earnings (USD)'].sum() if not dk_prior.empty and 'Earnings (USD)' in dk_prior.columns else 0
-conv_prior = spot_prior['Converted Listeners'].sum() if not spot_prior.empty and 'Converted Listeners' in spot_prior.columns else 0
+conv_prior = (spot_prior['Converted Listeners'].sum() if not spot_prior.empty and 'Converted Listeners' in spot_prior.columns else 0) + (submithub_prior[submithub_prior['action'] == 'Approved'].shape[0] if not submithub_prior.empty else 0)
 streams_prior = dk_prior['Quantity'].sum() if not dk_prior.empty and 'Quantity' in dk_prior.columns else 0
 save_prior = spot_prior['Save Rate'].mean() if not spot_prior.empty and 'Save Rate' in spot_prior.columns else 0
 
 roas_prior = (earn_prior / spend_prior) if spend_prior > 0 else 0
 cpa_prior = (spend_prior / conv_prior) if conv_prior > 0 else 0
+
 
 d_roas = roas_current - roas_prior if days_lookback else None
 d_cpa = cpa_current - cpa_prior if days_lookback else None
@@ -572,7 +728,7 @@ else:
 st.divider()
 
 st.subheader(f"🌍 Trends: {selected_timeframe}")
-tab_core, tab_season = st.tabs(["📈 Core Trends", "🍂 Seasonality Analysis"])
+tab_core, tab_season, tab_pr = st.tabs(["📈 Core Trends", "🍂 Seasonality Analysis", "📣 PR & Curator Outreach"])
 
 with tab_core:
     col_v1, col_v2 = st.columns([1, 1])
@@ -698,7 +854,103 @@ with tab_season:
     else:
         st.write("Awaiting campaign data for seasonality charts.")
 
+with tab_pr:
+    st.markdown("### 📣 PR & Curator Outreach Performance")
+    if submithub_df.empty:
+        st.info("Awaiting SubmitHub data. Upload your Response page text files in the sidebar to populate this view.")
+    else:
+        # 1. Outreach Metrics Cards
+        total_contacted = submithub_df.shape[0]
+        total_approved = submithub_df[submithub_df['action'] == 'Approved'].shape[0]
+        approval_rate = (total_approved / total_contacted * 100) if total_contacted > 0 else 0
+        total_cost = submithub_df['cost_usd'].sum()
+        total_reach = submithub_df['estimated_reach'].sum()
+        cpm_reach = (total_cost / total_reach * 1000) if total_reach > 0 else 0
+        
+        col_pr1, col_pr2, col_pr3, col_pr4, col_pr5 = st.columns(5)
+        col_pr1.metric("📬 Curators Contacted", f"{total_contacted}")
+        col_pr2.metric("🟢 Approval Rate", f"{approval_rate:.1f}%")
+        col_pr3.metric("💸 Total Spend", f"${total_cost:.2f}")
+        col_pr4.metric("📢 Estimated Reach", f"{total_reach:,.0f}" if pd.notna(total_reach) else "0")
+        col_pr5.metric("🎯 CPM Reach", f"${cpm_reach:.2f}" if total_reach > 0 else "$0.00", help="Cost Per 1,000 Playlist Followers Reached")
+        
+        st.write("---")
+        
+        # 2. Charts
+        col_ch1, col_ch2 = st.columns(2)
+        with col_ch1:
+            st.markdown("##### Outlet Response Status")
+            status_counts = submithub_df['action'].value_counts().reset_index()
+            status_counts.columns = ['Status', 'Count']
+            chart_status = alt.Chart(status_counts).mark_arc().encode(
+                theta=alt.Theta(field="Count", type="quantitative"),
+                color=alt.Color(field="Status", type="nominal", scale=alt.Scale(range=['#34D399', '#FBAD30', '#F87171'])),
+                tooltip=['Status', 'Count']
+            )
+            st.altair_chart(chart_status, use_container_width=True)
+            
+        with col_ch2:
+            st.markdown("##### Submissions by Outlet Type")
+            outlet_counts = submithub_df['outlet_type'].value_counts().reset_index()
+            outlet_counts.columns = ['Outlet Type', 'Count']
+            chart_outlets = alt.Chart(outlet_counts).mark_bar().encode(
+                x=alt.X('Count:Q', title='Submissions'),
+                y=alt.Y('Outlet Type:N', sort='-x', title=''),
+                color=alt.value('#FBAD30')
+            )
+            st.altair_chart(chart_outlets, use_container_width=True)
+            
+        st.write("---")
+        
+        # 3. Placements and Reach Analysis
+        st.subheader("Approved Placements & Reach")
+        approvals_df = submithub_df[submithub_df['action'] == 'Approved'].copy()
+        if approvals_df.empty:
+            st.info("No approved placements for this track/timeframe yet.")
+        else:
+            approvals_df['reach_display'] = approvals_df['estimated_reach'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A (Radio/Blog)")
+            display_approvals = approvals_df[['song', 'outlet', 'outlet_type', 'outlet_country', 'credits_spent', 'share_destination', 'reach_display']].rename(
+                columns={
+                    'song': 'Track Name',
+                    'outlet': 'Curator Name',
+                    'outlet_type': 'Platform',
+                    'outlet_country': 'Country',
+                    'credits_spent': 'Credits Used',
+                    'share_destination': 'Share Details / Playlist',
+                    'reach_display': 'Playlist Followers'
+                }
+            )
+            st.dataframe(display_approvals, use_container_width=True, hide_index=True)
+            
+        st.write("---")
+        
+        # 4. Searchable written feedback feed
+        st.subheader("Curator Feedback Explorer")
+        feedback_df = submithub_df[submithub_df['feedback'].str.strip() != ""].copy()
+        if feedback_df.empty:
+            st.info("No written feedback reviews available.")
+        else:
+            search_query = st.text_input("🔍 Search written curator feedback (e.g. 'vocals', 'tempo', 'production')", "")
+            
+            if search_query:
+                feedback_df = feedback_df[feedback_df['feedback'].str.contains(search_query, case=False, na=False)]
+                
+            if feedback_df.empty:
+                st.write("No matching reviews found.")
+            else:
+                display_feedback = feedback_df[['song', 'outlet', 'outlet_type', 'action', 'feedback']].rename(
+                    columns={
+                        'song': 'Track Name',
+                        'outlet': 'Curator',
+                        'outlet_type': 'Platform',
+                        'action': 'Verdict',
+                        'feedback': 'Curator Review Comment'
+                    }
+                )
+                st.dataframe(display_feedback, use_container_width=True, hide_index=True)
+
 st.divider()
+
 
 st.subheader("🤖 Strategic Anomaly Engine (Ready for CMO)")
 st.markdown("Use the expander below to reveal your automated marketing breakdown.")

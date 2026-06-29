@@ -5,7 +5,9 @@ import pandas as pd
 import pytest
 
 # A mock helper that is callable and behaves as a context manager
-class MockContextManagerAndCallable(MagicMock):
+class MockContextManagerAndCallable:
+    def __init__(self, *args, **kwargs):
+        pass
     def __enter__(self):
         return self
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -18,6 +20,9 @@ class MockContextManagerAndCallable(MagicMock):
         return True
     def __len__(self):
         return 0
+    def __getattr__(self, name):
+        return self
+
 
 # Create robust mock for streamlit module to allow importing and running the dashboard app
 class MockStreamlit:
@@ -54,6 +59,9 @@ class MockStreamlit:
         if options:
             return list(options)[0]
         return ""
+        
+    def text_input(self, label, value="", *args, **kwargs):
+        return value
         
     def file_uploader(self, *args, **kwargs):
         return None
@@ -109,14 +117,16 @@ def test_stitch_data_processing():
     spot_base = pd.DataFrame()
     s4a_base = pd.DataFrame()
     
-    dk_df, spot_df, s4a_df, meta_df = tsab_analytics_app.process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df = tsab_analytics_app.process_data(
         dk_base_df=dk_base,
         dk_files=None,
         spot_base_df=spot_base,
         spot_files=None,
         s4a_base_df=s4a_base,
         s4a_files=None,
-        meta_files=None
+        meta_files=None,
+        submithub_base_df=pd.DataFrame(),
+        submithub_files=None
     )
     
     assert not dk_df.empty
@@ -124,3 +134,5 @@ def test_stitch_data_processing():
     assert spot_df.empty
     assert s4a_df.empty
     assert meta_df.empty
+    assert submithub_df.empty
+
