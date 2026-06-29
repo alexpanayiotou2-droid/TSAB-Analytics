@@ -310,4 +310,59 @@ ON s4a_daily_streams FOR SELECT
 TO anon, authenticated USING (true);
 
 
+--------------------------------------------------------------------------------
+-- 5. SUBMITHUB TABLES & POLICIES
+--------------------------------------------------------------------------------
+
+-- Table: submithub_credit_purchases
+CREATE TABLE IF NOT EXISTS submithub_credit_purchases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    purchase_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    amount_paid_usd NUMERIC(10, 2) NOT NULL,
+    credits_purchased INTEGER NOT NULL,
+    cost_per_credit NUMERIC(10, 4) GENERATED ALWAYS AS (amount_paid_usd / NULLIF(credits_purchased, 0)) STORED,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Table: submithub_submissions
+CREATE TABLE IF NOT EXISTS submithub_submissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    song VARCHAR(255) NOT NULL,
+    campaign_url VARCHAR(255),
+    campaign_date TIMESTAMP WITH TIME ZONE,
+    outlet VARCHAR(255) NOT NULL,
+    outlet_type VARCHAR(100),
+    outlet_url VARCHAR(255),
+    outlet_country VARCHAR(100),
+    action VARCHAR(50) NOT NULL,
+    action_timestamp TIMESTAMP WITH TIME ZONE,
+    feedback TEXT,
+    listen_time_seconds INTEGER,
+    credits_spent INTEGER NOT NULL DEFAULT 0,
+    credit_type VARCHAR(50),
+    is_refunded BOOLEAN NOT NULL DEFAULT FALSE,
+    cost_usd NUMERIC(10, 4) DEFAULT 0.0000,
+    share_destination VARCHAR(255),
+    estimated_reach INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE submithub_credit_purchases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE submithub_submissions ENABLE ROW LEVEL SECURITY;
+
+-- Policies
+DROP POLICY IF EXISTS "Allow read access to anon users" ON submithub_credit_purchases;
+DROP POLICY IF EXISTS "Allow read access to anon users" ON submithub_submissions;
+
+CREATE POLICY "Allow read access to anon users" 
+ON submithub_credit_purchases FOR SELECT 
+TO anon, authenticated USING (true);
+
+CREATE POLICY "Allow read access to anon users" 
+ON submithub_submissions FOR SELECT 
+TO anon, authenticated USING (true);
+
+
+
 
