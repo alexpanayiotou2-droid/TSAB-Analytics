@@ -253,6 +253,10 @@ with st.sidebar:
     submithub_uploads = st.file_uploader("5. Add SubmitHub Data", type=["txt", "csv", "xlsx", "xls"], accept_multiple_files=True)
     st.caption("📂 *Expects: Response page text (.txt), submission history (.csv), purchase history (.xlsx), or pre-merged CSV*")
 
+    playlist_push_uploads = st.file_uploader("6. Add Playlist Push Data", type=["pdf", "csv"], accept_multiple_files=True)
+    st.caption("📂 *Expects: Campaign responses (.pdf), invoice (.pdf), or summary CSV*")
+
+
 
 
 # Fetch Base Data from Supabase (with Fallbacks)
@@ -261,6 +265,9 @@ spot_base_df = load_base_data("spotify_campaign_metrics", "Spotify For Artists/S
 s4a_base_df = load_base_data("s4a_daily_streams", None, {})
 submithub_base_df = load_base_data("submithub_submissions", None, {})
 submithub_purchases_base_df = load_base_data("submithub_credit_purchases", None, {})
+pp_campaigns_base_df = load_base_data("playlist_push_campaigns", None, {})
+pp_placements_base_df = load_base_data("playlist_push_placements", None, {})
+
 
 
 
@@ -368,7 +375,9 @@ def parse_raw_text_content(content, song_name):
     return curators
 
 @st.cache_data
-def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files, submithub_base_df, submithub_purchases_base_df, submithub_files):
+def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files, 
+                 submithub_base_df, submithub_purchases_base_df, submithub_files,
+                 pp_campaigns_base_df, pp_placements_base_df, pp_files):
     
     def stitch_data(base_df, uploaded_files):
         dfs = []
@@ -650,7 +659,301 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
     else:
         submithub_df = pd.DataFrame(columns=['song', 'outlet', 'outlet_type', 'credits_spent', 'credit_type', 'status', 'feedback', 'is_refunded', 'cost_usd', 'estimated_reach'])
 
+    # --- Playlist Push PDF parsing buffers ---
+    def parse_invoice_pdf_buffer(file_buf):
+        try:
+            reader = pypdf.PdfReader(file_buf)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            lines = [line.strip() for line in text.split('\n')]
+            
+            issued_date = None
+            amount_paid = None
+            song_name = None
+            
+            for i, line in enumerate(lines):
+                if 'Issued:' in line:
+                    if i + 1 < len(lines):
+                        date_candidate = lines[i+1].strip()
+                        try:
+                            issued_date = pd.to_datetime(date_candidate).date()
+                        except Exception:
+                            pass
+                elif 'Amount paid' in line:
+                    match = re.search(r'\$?([\d,]+\.?\d*)', line)
+                    if match:
+                        amount_paid = float(match.group(1).replace(',', ''))
+                elif 'Spotify campaign' in line:
+                    if i + 1 < len(lines):
+                        cand = lines[i+1].strip()
+                        cand_clean = cand.replace('Socially Acceptable', '').strip()
+                        match_song = re.match(r'^([a-zA-Z\s]+)\s+\d+x', cand_clean)
+                        if match_song:
+                            song_name = match_song.group(1).strip()
+                            
+            if not song_name and 'invoice-' in file_buf.name.lower():
+                parts = file_buf.name.split('-')
+                if len(parts) >= 3:
+                    song_name = parts[-1].replace('.pdf', '').strip()
+                    
+            return {
+                'song': song_name,
+                'issued_date': issued_date,
+                'amount_paid': amount_paid
+            }
+        except Exception:
+            return None
+
+    def parse_responses_pdf_buffer(file_buf, song_name_from_file=None):
+        try:
+            reader = pypdf.PdfReader(file_buf)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            lines = [line.strip() for line in text.split('\n')]
+            
+            song_name = song_name_from_file
+            if not song_name and len(lines) > 0:
+                match_song = re.match(r'^(.+?)\s+by\s+Socially\s+Acceptable', lines[0], re.IGNORECASE)
+                if match_song:
+                    song_name = match_song.group(1).strip()
+                    
+            print_date = datetime.now()
+            for line in lines:
+                match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4}),?\s+(\d{1,2}:\d{2}\s*[APM]*)', line, re.IGNORECASE)
+                if match:
+                    try:
+                        date_str = match.group(1)
+                        parts = date_str.split('/')
+                        if len(parts[2]) == 2:
+                            parts[2] = '20' + parts[2]
+                        clean_date_str = '/'.join(parts)
+                        print_date = pd.to_datetime(clean_date_str)
+                        break
+                    except Exception:
+                        pass
+                        
+            placements = []
+            details_regex = re.compile(
+                r'([\d,]+)\s+Saves\s+·\s+Curator\s+(.+?)\s+(\d+\s+(?:year|month|day|week)s?\s+ago|a\s+year\s+ago|a\s+month\s+ago|a\s+day\s+ago)\s+#(\d+)\s+Avg\s+(\d+)\s+month[s]?',
+                re.IGNORECASE
+            )
+            
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if line.startswith('') or ('saves' in lines[i+1].lower() and 'curator' in lines[i+1].lower() if i+1 < len(lines) else False):
+                    playlist_name = line.replace('', '').strip()
+                    i += 1
+                    if i >= len(lines):
+                        break
+                    details_line = lines[i]
+                    match = details_regex.match(details_line)
+                    if match:
+                        saves = int(match.group(1).replace(',', ''))
+                        curator = match.group(2).strip()
+                        time_ago = match.group(3).strip()
+                        index = int(match.group(4))
+                        avg_duration = int(match.group(5))
+                        
+                        clean_str = time_ago.strip().lower()
+                        if 'year' in clean_str:
+                            m_val = re.search(r'(\d+)', clean_str)
+                            years = int(m_val.group(1)) if m_val else 1
+                            est_date = print_date - timedelta(days=years * 365)
+                        elif 'month' in clean_str:
+                            m_val = re.search(r'(\d+)', clean_str)
+                            months = int(m_val.group(1)) if m_val else 1
+                            est_date = print_date - timedelta(days=months * 30.4)
+                        elif 'week' in clean_str:
+                            m_val = re.search(r'(\d+)', clean_str)
+                            weeks = int(m_val.group(1)) if m_val else 1
+                            est_date = print_date - timedelta(weeks=weeks)
+                        else:
+                            est_date = print_date
+                            
+                        placements.append({
+                            'song': song_name,
+                            'playlist_name': playlist_name,
+                            'curator': curator,
+                            'saves': saves,
+                            'added_time_ago': time_ago,
+                            'estimated_date': est_date.date().isoformat(),
+                            'playlist_index': index,
+                            'avg_duration_months': avg_duration
+                        })
+                i += 1
+            return placements
+        except Exception:
+            return []
+
+    # --- Playlist Push Parsing ---
+    pp_campaigns_dfs = []
+    pp_placements_dfs = []
     
+    if not pp_campaigns_base_df.empty:
+        pp_campaigns_dfs.append(pp_campaigns_base_df)
+    if not pp_placements_base_df.empty:
+        pp_placements_dfs.append(pp_placements_base_df)
+        
+    has_pp_uploads = False
+    if pp_files:
+        has_pp_uploads = True
+        summary_csv = None
+        invoice_pdfs = []
+        response_pdfs = []
+        for file in pp_files:
+            if file.name.endswith('.csv'):
+                summary_csv = file
+            elif file.name.endswith('.pdf'):
+                if 'invoice' in file.name.lower():
+                    invoice_pdfs.append(file)
+                else:
+                    response_pdfs.append(file)
+                    
+        invoices_data = {}
+        for file in invoice_pdfs:
+            res = parse_invoice_pdf_buffer(file)
+            if res and res['song']:
+                invoices_data[res['song'].lower()] = res
+                
+        parsed_placements = []
+        for file in response_pdfs:
+            song_name_from_file = None
+            if 'responses for_' in file.name.lower():
+                parts = file.name.split('responses for_')
+                if len(parts) >= 2:
+                    song_name_from_file = parts[1].split('-')[0].strip()
+            pl = parse_responses_pdf_buffer(file, song_name_from_file)
+            parsed_placements.extend(pl)
+            
+        if summary_csv:
+            try:
+                sdf = pd.read_csv(summary_csv)
+                sdf.columns = sdf.columns.str.strip().str.lower()
+                camps = []
+                for idx, row in sdf.iterrows():
+                    song_name = row['song'].strip()
+                    budget_str = str(row['campaign budget']).replace('$', '').strip()
+                    budget = float(budget_str)
+                    responses_count = int(row['curator responses'])
+                    adds = int(row['playlist adds'])
+                    reach = int(str(row['playlist followers']).replace(',', '').strip())
+                    popularity = int(row['spotify popularity']) if 'spotify popularity' in row else None
+                    
+                    campaign_date = None
+                    if song_name.lower() in invoices_data:
+                        campaign_date = invoices_data[song_name.lower()]['issued_date']
+                        if campaign_date:
+                            campaign_date = campaign_date.isoformat()
+                            
+                    if not campaign_date:
+                        song_placements = [p for p in parsed_placements if p['song'] and p['song'].lower() == song_name.lower()]
+                        if song_placements:
+                            oldest = min(song_placements, key=lambda x: x['estimated_date'])
+                            campaign_date = oldest['estimated_date']
+                            
+                    camps.append({
+                        'song': song_name,
+                        'campaign_date': campaign_date,
+                        'budget_usd': budget,
+                        'total_responses': responses_count,
+                        'playlist_adds': adds,
+                        'total_reach': reach,
+                        'spotify_popularity': popularity
+                    })
+                pp_campaigns_dfs.append(pd.DataFrame(camps))
+            except Exception:
+                pass
+                
+        if parsed_placements:
+            pp_placements_dfs.append(pd.DataFrame(parsed_placements))
+            
+    if not has_pp_uploads and pp_campaigns_base_df.empty:
+        pp_dir = "data-backend/Playlist Push"
+        local_csv = os.path.join(pp_dir, "Socially Acceptable - Playlist Push Campaign Results.csv")
+        if os.path.exists(local_csv):
+            try:
+                sdf = pd.read_csv(local_csv)
+                sdf.columns = sdf.columns.str.strip().str.lower()
+                camps = []
+                local_placements = []
+                for idx, row in sdf.iterrows():
+                    song_name = row['song'].strip()
+                    budget_str = str(row['campaign budget']).replace('$', '').strip()
+                    budget = float(budget_str)
+                    responses_count = int(row['curator responses'])
+                    adds = int(row['playlist adds'])
+                    reach = int(str(row['playlist followers']).replace(',', '').strip())
+                    popularity = int(row['spotify popularity']) if 'spotify popularity' in row else None
+                    
+                    resp_pdf_name = f"[P] Campaign responses for_ {song_name} - Playlist Push.pdf"
+                    resp_pdf_path = None
+                    for f in os.listdir(pp_dir):
+                        if f.lower() == resp_pdf_name.lower():
+                            resp_pdf_path = os.path.join(pp_dir, f)
+                            break
+                    pl = []
+                    if resp_pdf_path:
+                        with open(resp_pdf_path, 'rb') as f_pdf:
+                            pl = parse_responses_pdf_buffer(f_pdf, song_name)
+                            for p in pl:
+                                p['song'] = song_name
+                            local_placements.extend(pl)
+                            
+                    inv_pdf_path = None
+                    for f in os.listdir(pp_dir):
+                        if 'invoice' in f.lower() and song_name.lower() in f.lower() and f.endswith('.pdf'):
+                            inv_pdf_path = os.path.join(pp_dir, f)
+                            break
+                    campaign_date = None
+                    if inv_pdf_path:
+                        with open(inv_pdf_path, 'rb') as f_pdf:
+                            inv_data = parse_invoice_pdf_buffer(f_pdf)
+                            if inv_data and inv_data['issued_date']:
+                                campaign_date = inv_data['issued_date'].isoformat()
+                                
+                    if not campaign_date and pl:
+                        oldest = min(pl, key=lambda x: x['estimated_date'])
+                        campaign_date = oldest['estimated_date']
+                        
+                    camps.append({
+                        'song': song_name,
+                        'campaign_date': campaign_date,
+                        'budget_usd': budget,
+                        'total_responses': responses_count,
+                        'playlist_adds': adds,
+                        'total_reach': reach,
+                        'spotify_popularity': popularity
+                    })
+                pp_campaigns_dfs.append(pd.DataFrame(camps))
+                if local_placements:
+                    pp_placements_dfs.append(pd.DataFrame(local_placements))
+            except Exception:
+                pass
+                
+    if pp_campaigns_dfs:
+        pp_campaigns_df = pd.concat(pp_campaigns_dfs, ignore_index=True).drop_duplicates(subset=['song'])
+    else:
+        pp_campaigns_df = pd.DataFrame(columns=['song', 'campaign_date', 'budget_usd', 'total_responses', 'playlist_adds', 'total_reach', 'spotify_popularity'])
+        
+    if pp_placements_dfs:
+        pp_placements_df = pd.concat(pp_placements_dfs, ignore_index=True).drop_duplicates(subset=['song', 'playlist_name'])
+    else:
+        pp_placements_df = pd.DataFrame(columns=['song', 'playlist_name', 'curator', 'saves', 'added_time_ago', 'estimated_date', 'playlist_index', 'avg_duration_months'])
+
+    # Standardize types
+    if not pp_campaigns_df.empty:
+        pp_campaigns_df['budget_usd'] = pd.to_numeric(pp_campaigns_df['budget_usd'], errors='coerce').fillna(0)
+        pp_campaigns_df['total_responses'] = pd.to_numeric(pp_campaigns_df['total_responses'], errors='coerce').fillna(0)
+        pp_campaigns_df['playlist_adds'] = pd.to_numeric(pp_campaigns_df['playlist_adds'], errors='coerce').fillna(0)
+        pp_campaigns_df['total_reach'] = pd.to_numeric(pp_campaigns_df['total_reach'], errors='coerce').fillna(0)
+    if not pp_placements_df.empty:
+        pp_placements_df['saves'] = pd.to_numeric(pp_placements_df['saves'], errors='coerce').fillna(0)
+        pp_placements_df['playlist_index'] = pd.to_numeric(pp_placements_df['playlist_index'], errors='coerce').fillna(0)
+        pp_placements_df['avg_duration_months'] = pd.to_numeric(pp_placements_df['avg_duration_months'], errors='coerce').fillna(0)
+        
     if not meta_df.empty:
         meta_df['Start Date'] = pd.to_datetime(meta_df['Start Date'], errors='coerce')
         meta_df['Amount Spent (USD)'] = pd.to_numeric(meta_df['Amount Spent (USD)'], errors='coerce').fillna(0)
@@ -670,10 +973,15 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         spot_df['Save Rate'] = pd.to_numeric(spot_df['Save Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
         spot_df['Intent Rate'] = pd.to_numeric(spot_df['Intent Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
     
-    return dk_df, spot_df, s4a_df, meta_df, submithub_df
+    return dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df
 
 with st.spinner("Stitching and processing datasets..."):
-    dk_df, spot_df, s4a_df, meta_df, submithub_df = process_data(dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads, submithub_base_df, submithub_purchases_base_df, submithub_uploads)
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df = process_data(
+        dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads, 
+        submithub_base_df, submithub_purchases_base_df, submithub_uploads,
+        pp_campaigns_base_df, pp_placements_base_df, playlist_push_uploads
+    )
+
 
 
 
@@ -708,6 +1016,9 @@ if selected_view != "All Catalog (Aggregate)":
     spot_df = spot_df[spot_df['Release Name'] == selected_view] if not spot_df.empty else spot_df
     s4a_df = s4a_df[s4a_df['track_name'].str.contains(selected_view, case=False, na=False, regex=False)] if not s4a_df.empty else s4a_df
     submithub_df = submithub_df[submithub_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not submithub_df.empty else submithub_df
+    pp_campaigns_df = pp_campaigns_df[pp_campaigns_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not pp_campaigns_df.empty else pp_campaigns_df
+    pp_placements_df = pp_placements_df[pp_placements_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not pp_placements_df.empty else pp_placements_df
+
 
 
 # --- 4. AUTOMATED EDA LOGIC ---
@@ -857,47 +1168,76 @@ spot_anchor = spot_df['End Date'].max() if not spot_df.empty else pd.Timestamp.n
 meta_anchor = meta_df['Start Date'].max() if not meta_df.empty else pd.Timestamp.now()
 submithub_anchor = pd.to_datetime(submithub_df['campaign_date'], errors='coerce').max() if not submithub_df.empty else pd.Timestamp.now()
 
-# Standardize date formats in submithub_df
+# Standardize date formats in submithub_df & pp_campaigns_df
 if not submithub_df.empty:
     submithub_df['campaign_date'] = pd.to_datetime(submithub_df['campaign_date'], errors='coerce')
     submithub_df['cost_usd'] = pd.to_numeric(submithub_df['cost_usd'], errors='coerce').fillna(0)
+if not pp_campaigns_df.empty:
+    pp_campaigns_df['campaign_date'] = pd.to_datetime(pp_campaigns_df['campaign_date'], errors='coerce')
+    pp_campaigns_df['budget_usd'] = pd.to_numeric(pp_campaigns_df['budget_usd'], errors='coerce').fillna(0)
+
+pp_anchor = pd.to_datetime(pp_campaigns_df['campaign_date'], errors='coerce').max() if not pp_campaigns_df.empty else pd.Timestamp.now()
 
 if days_lookback:
     dk_current = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback)) & (dk_df['Reporting Date'] <= dk_anchor)] if not dk_df.empty else dk_df
     spot_current = spot_df[(spot_df['End Date'] > spot_anchor - pd.Timedelta(days=days_lookback)) & (spot_df['End Date'] <= spot_anchor)] if not spot_df.empty else spot_df
     meta_current = meta_df[(meta_df['Start Date'] > meta_anchor - pd.Timedelta(days=days_lookback)) & (meta_df['Start Date'] <= meta_anchor)] if not meta_df.empty else meta_df
     submithub_current = submithub_df[(submithub_df['campaign_date'] > submithub_anchor - pd.Timedelta(days=days_lookback)) & (submithub_df['campaign_date'] <= submithub_anchor)] if not submithub_df.empty else submithub_df
+    pp_current = pp_campaigns_df[(pp_campaigns_df['campaign_date'] > pp_anchor - pd.Timedelta(days=days_lookback)) & (pp_campaigns_df['campaign_date'] <= pp_anchor)] if not pp_campaigns_df.empty else pp_campaigns_df
     
     dk_prior = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback*2)) & (dk_df['Reporting Date'] <= dk_anchor - pd.Timedelta(days=days_lookback))] if not dk_df.empty else dk_df
     spot_prior = spot_df[(spot_df['End Date'] > spot_anchor - pd.Timedelta(days=days_lookback*2)) & (spot_df['End Date'] <= spot_anchor - pd.Timedelta(days=days_lookback))] if not spot_df.empty else spot_df
     meta_prior = meta_df[(meta_df['Start Date'] > meta_anchor - pd.Timedelta(days=days_lookback*2)) & (meta_df['Start Date'] <= meta_anchor - pd.Timedelta(days=days_lookback))] if not meta_df.empty else meta_df
     submithub_prior = submithub_df[(submithub_df['campaign_date'] > submithub_anchor - pd.Timedelta(days=days_lookback*2)) & (submithub_df['campaign_date'] <= submithub_anchor - pd.Timedelta(days=days_lookback))] if not submithub_df.empty else submithub_df
+    pp_prior = pp_campaigns_df[(pp_campaigns_df['campaign_date'] > pp_anchor - pd.Timedelta(days=days_lookback*2)) & (pp_campaigns_df['campaign_date'] <= pp_anchor - pd.Timedelta(days=days_lookback))] if not pp_campaigns_df.empty else pp_campaigns_df
 else:
     dk_current = dk_df
     spot_current = spot_df
     meta_current = meta_df
     submithub_current = submithub_df
+    pp_current = pp_campaigns_df
+    
     dk_prior = pd.DataFrame(columns=dk_df.columns if not dk_df.empty else [])
     spot_prior = pd.DataFrame(columns=spot_df.columns if not spot_df.empty else [])
     meta_prior = pd.DataFrame(columns=meta_df.columns if not meta_df.empty else [])
     submithub_prior = pd.DataFrame(columns=submithub_df.columns if not submithub_df.empty else [])
+    pp_prior = pd.DataFrame(columns=pp_campaigns_df.columns if not pp_campaigns_df.empty else [])
 
-# Compute Blended Spend: Spotify + Meta + SubmitHub
-spend_current = (spot_current['Spend'].sum() if not spot_current.empty else 0) + (meta_current['Amount Spent (USD)'].sum() if not meta_current.empty else 0) + (submithub_current['cost_usd'].sum() if not submithub_current.empty else 0)
+# Compute Blended Spend: Spotify + Meta + SubmitHub + Playlist Push
+spend_current = (
+    (spot_current['Spend'].sum() if not spot_current.empty else 0) + 
+    (meta_current['Amount Spent (USD)'].sum() if not meta_current.empty else 0) + 
+    (submithub_current['cost_usd'].sum() if not submithub_current.empty else 0) +
+    (pp_current['budget_usd'].sum() if not pp_current.empty else 0)
+)
 earn_current = dk_current['Earnings (USD)'].sum() if not dk_current.empty else 0
-# Compute Blended Conversions: Spotify converted listeners + SubmitHub approvals
-conv_current = (spot_current['Converted Listeners'].sum() if not spot_current.empty else 0) + (submithub_current[submithub_current['action'] == 'Approved'].shape[0] if not submithub_current.empty else 0)
+# Compute Blended Conversions: Spotify converted listeners + SubmitHub approvals + Playlist Push adds
+conv_current = (
+    (spot_current['Converted Listeners'].sum() if not spot_current.empty else 0) + 
+    (submithub_current[submithub_current['action'] == 'Approved'].shape[0] if not submithub_current.empty else 0) +
+    (pp_current['playlist_adds'].sum() if not pp_current.empty else 0)
+)
 streams_current = dk_current['Quantity'].sum() if not dk_current.empty else 0
 save_current = spot_current['Save Rate'].mean() if not spot_current.empty else 0
 
 roas_current = (earn_current / spend_current) if spend_current > 0 else 0
 cpa_current = (spend_current / conv_current) if conv_current > 0 else 0
 
-spend_prior = (spot_prior['Spend'].sum() if not spot_prior.empty and 'Spend' in spot_prior.columns else 0) + (meta_prior['Amount Spent (USD)'].sum() if not meta_prior.empty and 'Amount Spent (USD)' in meta_prior.columns else 0) + (submithub_prior['cost_usd'].sum() if not submithub_prior.empty and 'cost_usd' in submithub_prior.columns else 0)
+spend_prior = (
+    (spot_prior['Spend'].sum() if not spot_prior.empty and 'Spend' in spot_prior.columns else 0) + 
+    (meta_prior['Amount Spent (USD)'].sum() if not meta_prior.empty and 'Amount Spent (USD)' in meta_prior.columns else 0) + 
+    (submithub_prior['cost_usd'].sum() if not submithub_prior.empty and 'cost_usd' in submithub_prior.columns else 0) +
+    (pp_prior['budget_usd'].sum() if not pp_prior.empty and 'budget_usd' in pp_prior.columns else 0)
+)
 earn_prior = dk_prior['Earnings (USD)'].sum() if not dk_prior.empty and 'Earnings (USD)' in dk_prior.columns else 0
-conv_prior = (spot_prior['Converted Listeners'].sum() if not spot_prior.empty and 'Converted Listeners' in spot_prior.columns else 0) + (submithub_prior[submithub_prior['action'] == 'Approved'].shape[0] if not submithub_prior.empty else 0)
+conv_prior = (
+    (spot_prior['Converted Listeners'].sum() if not spot_prior.empty and 'Converted Listeners' in spot_prior.columns else 0) + 
+    (submithub_prior[submithub_prior['action'] == 'Approved'].shape[0] if not submithub_prior.empty else 0) +
+    (pp_prior['playlist_adds'].sum() if not pp_prior.empty and 'playlist_adds' in pp_prior.columns else 0)
+)
 streams_prior = dk_prior['Quantity'].sum() if not dk_prior.empty and 'Quantity' in dk_prior.columns else 0
 save_prior = spot_prior['Save Rate'].mean() if not spot_prior.empty and 'Save Rate' in spot_prior.columns else 0
+
 
 roas_prior = (earn_prior / spend_prior) if spend_prior > 0 else 0
 cpa_prior = (spend_prior / conv_prior) if conv_prior > 0 else 0
@@ -1067,98 +1407,166 @@ with tab_season:
 
 with tab_pr:
     st.markdown("### 📣 PR & Curator Outreach Performance")
-    if submithub_df.empty:
-        st.info("Awaiting SubmitHub data. Upload your Response page text files in the sidebar to populate this view.")
-    else:
-        # 1. Outreach Metrics Cards
-        total_contacted = submithub_df.shape[0]
-        total_approved = submithub_df[submithub_df['action'] == 'Approved'].shape[0]
-        approval_rate = (total_approved / total_contacted * 100) if total_contacted > 0 else 0
-        total_cost = submithub_df['cost_usd'].sum()
-        total_reach = submithub_df['estimated_reach'].sum()
-        cpm_reach = (total_cost / total_reach * 1000) if total_reach > 0 else 0
-        
-        col_pr1, col_pr2, col_pr3, col_pr4, col_pr5 = st.columns(5)
-        col_pr1.metric("📬 Curators Contacted", f"{total_contacted}")
-        col_pr2.metric("🟢 Approval Rate", f"{approval_rate:.1f}%")
-        col_pr3.metric("💸 Total Spend", f"${total_cost:.2f}")
-        col_pr4.metric("📢 Estimated Reach", f"{total_reach:,.0f}" if pd.notna(total_reach) else "0")
-        col_pr5.metric("🎯 CPM Reach", f"${cpm_reach:.2f}" if total_reach > 0 else "$0.00", help="Cost Per 1,000 Playlist Followers Reached")
-        
-        st.write("---")
-        
-        # 2. Charts
-        col_ch1, col_ch2 = st.columns(2)
-        with col_ch1:
-            st.markdown("##### Outlet Response Status")
-            status_counts = submithub_df['action'].value_counts().reset_index()
-            status_counts.columns = ['Status', 'Count']
-            chart_status = alt.Chart(status_counts).mark_arc().encode(
-                theta=alt.Theta(field="Count", type="quantitative"),
-                color=alt.Color(field="Status", type="nominal", scale=alt.Scale(range=['#34D399', '#FBAD30', '#F87171'])),
-                tooltip=['Status', 'Count']
-            )
-            st.altair_chart(chart_status, use_container_width=True)
-            
-        with col_ch2:
-            st.markdown("##### Submissions by Outlet Type")
-            outlet_counts = submithub_df['outlet_type'].value_counts().reset_index()
-            outlet_counts.columns = ['Outlet Type', 'Count']
-            chart_outlets = alt.Chart(outlet_counts).mark_bar().encode(
-                x=alt.X('Count:Q', title='Submissions'),
-                y=alt.Y('Outlet Type:N', sort='-x', title=''),
-                color=alt.value('#FBAD30')
-            )
-            st.altair_chart(chart_outlets, use_container_width=True)
-            
-        st.write("---")
-        
-        # 3. Placements and Reach Analysis
-        st.subheader("Approved Placements & Reach")
-        approvals_df = submithub_df[submithub_df['action'] == 'Approved'].copy()
-        if approvals_df.empty:
-            st.info("No approved placements for this track/timeframe yet.")
+    
+    pr_platform = st.radio("Select Outreach Platform", ["SubmitHub", "Playlist Push"], horizontal=True)
+    
+    if pr_platform == "SubmitHub":
+        if submithub_df.empty:
+            st.info("Awaiting SubmitHub data. Upload your Response page text files in the sidebar to populate this view.")
         else:
-            approvals_df['reach_display'] = approvals_df['estimated_reach'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A (Radio/Blog)")
-            display_approvals = approvals_df[['song', 'outlet', 'outlet_type', 'outlet_country', 'credits_spent', 'share_destination', 'reach_display']].rename(
-                columns={
-                    'song': 'Track Name',
-                    'outlet': 'Curator Name',
-                    'outlet_type': 'Platform',
-                    'outlet_country': 'Country',
-                    'credits_spent': 'Credits Used',
-                    'share_destination': 'Share Details / Playlist',
-                    'reach_display': 'Playlist Followers'
-                }
-            )
-            st.dataframe(display_approvals, use_container_width=True, hide_index=True)
+            # 1. Outreach Metrics Cards
+            total_contacted = submithub_df.shape[0]
+            total_approved = submithub_df[submithub_df['action'] == 'Approved'].shape[0]
+            approval_rate = (total_approved / total_contacted * 100) if total_contacted > 0 else 0
+            total_cost = submithub_df['cost_usd'].sum()
+            total_reach = submithub_df['estimated_reach'].sum()
+            cpm_reach = (total_cost / total_reach * 1000) if total_reach > 0 else 0
             
-        st.write("---")
-        
-        # 4. Searchable written feedback feed
-        st.subheader("Curator Feedback Explorer")
-        feedback_df = submithub_df[submithub_df['feedback'].str.strip() != ""].copy()
-        if feedback_df.empty:
-            st.info("No written feedback reviews available.")
-        else:
-            search_query = st.text_input("🔍 Search written curator feedback (e.g. 'vocals', 'tempo', 'production')", "")
+            col_pr1, col_pr2, col_pr3, col_pr4, col_pr5 = st.columns(5)
+            col_pr1.metric("📬 Curators Contacted", f"{total_contacted}")
+            col_pr2.metric("🟢 Approval Rate", f"{approval_rate:.1f}%")
+            col_pr3.metric("💸 Total Spend", f"${total_cost:.2f}")
+            col_pr4.metric("📢 Estimated Reach", f"{total_reach:,.0f}" if pd.notna(total_reach) else "0")
+            col_pr5.metric("🎯 CPM Reach", f"${cpm_reach:.2f}" if total_reach > 0 else "$0.00", help="Cost Per 1,000 Playlist Followers Reached")
             
-            if search_query:
-                feedback_df = feedback_df[feedback_df['feedback'].str.contains(search_query, case=False, na=False)]
+            st.write("---")
+            
+            # 2. Charts
+            col_ch1, col_ch2 = st.columns(2)
+            with col_ch1:
+                st.markdown("##### Outlet Response Status")
+                status_counts = submithub_df['action'].value_counts().reset_index()
+                status_counts.columns = ['Status', 'Count']
+                chart_status = alt.Chart(status_counts).mark_arc().encode(
+                    theta=alt.Theta(field="Count", type="quantitative"),
+                    color=alt.Color(field="Status", type="nominal", scale=alt.Scale(range=['#34D399', '#FBAD30', '#F87171'])),
+                    tooltip=['Status', 'Count']
+                )
+                st.altair_chart(chart_status, use_container_width=True)
                 
-            if feedback_df.empty:
-                st.write("No matching reviews found.")
+            with col_ch2:
+                st.markdown("##### Submissions by Outlet Type")
+                outlet_counts = submithub_df['outlet_type'].value_counts().reset_index()
+                outlet_counts.columns = ['Outlet Type', 'Count']
+                chart_outlets = alt.Chart(outlet_counts).mark_bar().encode(
+                    x=alt.X('Count:Q', title='Submissions'),
+                    y=alt.Y('Outlet Type:N', sort='-x', title=''),
+                    color=alt.value('#FBAD30')
+                )
+                st.altair_chart(chart_outlets, use_container_width=True)
+                
+            st.write("---")
+            
+            # 3. Placements and Reach Analysis
+            st.subheader("Approved Placements & Reach")
+            approvals_df = submithub_df[submithub_df['action'] == 'Approved'].copy()
+            if approvals_df.empty:
+                st.info("No approved placements for this track/timeframe yet.")
             else:
-                display_feedback = feedback_df[['song', 'outlet', 'outlet_type', 'action', 'feedback']].rename(
+                approvals_df['reach_display'] = approvals_df['estimated_reach'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "N/A (Radio/Blog)")
+                display_approvals = approvals_df[['song', 'outlet', 'outlet_type', 'outlet_country', 'credits_spent', 'share_destination', 'reach_display']].rename(
                     columns={
                         'song': 'Track Name',
-                        'outlet': 'Curator',
+                        'outlet': 'Curator Name',
                         'outlet_type': 'Platform',
-                        'action': 'Verdict',
-                        'feedback': 'Curator Review Comment'
+                        'outlet_country': 'Country',
+                        'credits_spent': 'Credits Used',
+                        'share_destination': 'Share Details / Playlist',
+                        'reach_display': 'Playlist Followers'
                     }
                 )
-                st.dataframe(display_feedback, use_container_width=True, hide_index=True)
+                st.dataframe(display_approvals, use_container_width=True, hide_index=True)
+                
+            st.write("---")
+            
+            # 4. Searchable written feedback feed
+            st.subheader("Curator Feedback Explorer")
+            feedback_df = submithub_df[submithub_df['feedback'].str.strip() != ""].copy()
+            if feedback_df.empty:
+                st.info("No written feedback reviews available.")
+            else:
+                search_query = st.text_input("🔍 Search written curator feedback (e.g. 'vocals', 'tempo', 'production')", "")
+                
+                if search_query:
+                    feedback_df = feedback_df[feedback_df['feedback'].str.contains(search_query, case=False, na=False)]
+                    
+                if feedback_df.empty:
+                    st.write("No matching reviews found.")
+                else:
+                    display_feedback = feedback_df[['song', 'outlet', 'outlet_type', 'action', 'feedback']].rename(
+                        columns={
+                            'song': 'Track Name',
+                            'outlet': 'Curator',
+                            'outlet_type': 'Platform',
+                            'action': 'Verdict',
+                            'feedback': 'Curator Review Comment'
+                        }
+                    )
+                    st.dataframe(display_feedback, use_container_width=True, hide_index=True)
+                    
+    elif pr_platform == "Playlist Push":
+        if pp_campaigns_df.empty:
+            st.info("Awaiting Playlist Push data. Seeding or uploading your response PDF will populate this view.")
+        else:
+            # 1. Outreach Metrics Cards
+            total_campaigns = pp_campaigns_df.shape[0]
+            total_responses = pp_campaigns_df['total_responses'].sum()
+            total_adds = pp_campaigns_df['playlist_adds'].sum()
+            approval_rate = (total_adds / total_responses * 100) if total_responses > 0 else 0
+            total_cost = pp_campaigns_df['budget_usd'].sum()
+            total_reach = pp_campaigns_df['total_reach'].sum()
+            cpm_reach = (total_cost / total_reach * 1000) if total_reach > 0 else 0
+            
+            col_pp1, col_pp2, col_pp3, col_pp4, col_pp5 = st.columns(5)
+            col_pp1.metric("📬 Campaigns Run", f"{total_campaigns}")
+            col_pp2.metric("🟢 Approval Rate", f"{approval_rate:.1f}%")
+            col_pp3.metric("💸 Total Spend", f"${total_cost:.2f}")
+            col_pp4.metric("📢 Playlist Followers", f"{total_reach:,.0f}")
+            col_pp5.metric("🎯 CPM Reach", f"${cpm_reach:.2f}" if total_reach > 0 else "$0.00", help="Cost Per 1,000 Playlist Followers Reached")
+            
+            st.write("---")
+            
+            col_ch1, col_ch2 = st.columns(2)
+            with col_ch1:
+                st.markdown("##### Playlist Adds by Song")
+                adds_by_song = pp_campaigns_df.groupby('song')['playlist_adds'].sum().reset_index()
+                chart_adds = alt.Chart(adds_by_song).mark_bar().encode(
+                    x=alt.X('playlist_adds:Q', title='Playlist Adds'),
+                    y=alt.Y('song:N', sort='-x', title=''),
+                    color=alt.value('#34D399')
+                )
+                st.altair_chart(chart_adds, use_container_width=True)
+                
+            with col_ch2:
+                st.markdown("##### Spend distribution by Song")
+                spend_by_song = pp_campaigns_df.groupby('song')['budget_usd'].sum().reset_index()
+                chart_spend = alt.Chart(spend_by_song).mark_bar().encode(
+                    x=alt.X('budget_usd:Q', title='Spend (USD)'),
+                    y=alt.Y('song:N', sort='-x', title=''),
+                    color=alt.value('#FBAD30')
+                )
+                st.altair_chart(chart_spend, use_container_width=True)
+                
+            st.write("---")
+            
+            # 2. Placements
+            st.subheader("Approved Playlist Placements")
+            if pp_placements_df.empty:
+                st.info("No placement details found for this track/timeframe.")
+            else:
+                display_placements = pp_placements_df[['song', 'playlist_name', 'curator', 'saves', 'playlist_index', 'avg_duration_months', 'estimated_date']].rename(
+                    columns={
+                        'song': 'Track Name',
+                        'playlist_name': 'Playlist Name',
+                        'curator': 'Curator Name',
+                        'saves': 'Saves',
+                        'playlist_index': 'Playlist Position',
+                        'avg_duration_months': 'Avg Duration (Months)',
+                        'estimated_date': 'Estimated Date Added'
+                    }
+                )
+                st.dataframe(display_placements, use_container_width=True, hide_index=True)
+
 
 st.divider()
 

@@ -117,7 +117,7 @@ def test_stitch_data_processing():
     spot_base = pd.DataFrame()
     s4a_base = pd.DataFrame()
     
-    dk_df, spot_df, s4a_df, meta_df, submithub_df = tsab_analytics_app.process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df = tsab_analytics_app.process_data(
         dk_base_df=dk_base,
         dk_files=None,
         spot_base_df=spot_base,
@@ -127,7 +127,10 @@ def test_stitch_data_processing():
         meta_files=None,
         submithub_base_df=pd.DataFrame(),
         submithub_purchases_base_df=pd.DataFrame(),
-        submithub_files=None
+        submithub_files=None,
+        pp_campaigns_base_df=pd.DataFrame(),
+        pp_placements_base_df=pd.DataFrame(),
+        pp_files=None
     )
     
     assert not dk_df.empty
