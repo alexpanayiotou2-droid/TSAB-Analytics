@@ -117,7 +117,7 @@ def test_stitch_data_processing():
     spot_base = pd.DataFrame()
     s4a_base = pd.DataFrame()
     
-    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df = tsab_analytics_app.process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df = tsab_analytics_app.process_data(
         dk_base_df=dk_base,
         dk_files=None,
         spot_base_df=spot_base,
@@ -133,7 +133,10 @@ def test_stitch_data_processing():
         pp_files=None,
         ms_campaigns_base_df=pd.DataFrame(),
         ms_placements_base_df=pd.DataFrame(),
-        ms_files=None
+        ms_files=None,
+        ima_campaigns_base_df=pd.DataFrame(),
+        ima_placements_base_df=pd.DataFrame(),
+        ima_files=None
     )
     
     assert not dk_df.empty
@@ -164,7 +167,7 @@ def test_musosoup_processing():
         'placement_type': 'Playlist'
     }])
     
-    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df = tsab_analytics_app.process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df = tsab_analytics_app.process_data(
         dk_base_df=pd.DataFrame(),
         dk_files=None,
         spot_base_df=pd.DataFrame(),
@@ -180,11 +183,61 @@ def test_musosoup_processing():
         pp_files=None,
         ms_campaigns_base_df=ms_campaign_base,
         ms_placements_base_df=ms_placement_base,
-        ms_files=None
+        ms_files=None,
+        ima_campaigns_base_df=pd.DataFrame(),
+        ima_placements_base_df=pd.DataFrame(),
+        ima_files=None
     )
     
     assert not ms_camp_df.empty
     assert ms_camp_df.iloc[0]['song'] == 'SH2BA'
     assert not ms_place_df.empty
     assert ms_place_df.iloc[0]['curator'] == 'Curator A'
+
+
+def test_ima_processing():
+    ima_campaign_base = pd.DataFrame([{
+        'song': 'Astronaut',
+        'campaign_date': '2024-09-20',
+        'budget_usd': 297.0,
+        'invoice_id': '000013436',
+        'package_name': 'Spotify Playlist Promotion',
+        'guaranteed_streams': 10000
+    }])
+    ima_placement_base = pd.DataFrame([{
+        'song': 'Astronaut',
+        'playlist_name': 'cooking and dancing in the kitchen',
+        'platform': 'Spotify',
+        'curator': 'Cookfy',
+        'followers': 144687,
+        'published_date': '2026-06-04'
+    }])
+    
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df = tsab_analytics_app.process_data(
+        dk_base_df=pd.DataFrame(),
+        dk_files=None,
+        spot_base_df=pd.DataFrame(),
+        spot_files=None,
+        s4a_base_df=pd.DataFrame(),
+        s4a_files=None,
+        meta_files=None,
+        submithub_base_df=pd.DataFrame(),
+        submithub_purchases_base_df=pd.DataFrame(),
+        submithub_files=None,
+        pp_campaigns_base_df=pd.DataFrame(),
+        pp_placements_base_df=pd.DataFrame(),
+        pp_files=None,
+        ms_campaigns_base_df=pd.DataFrame(),
+        ms_placements_base_df=pd.DataFrame(),
+        ms_files=None,
+        ima_campaigns_base_df=ima_campaign_base,
+        ima_placements_base_df=ima_placement_base,
+        ima_files=None
+    )
+    
+    assert not ima_camp_df.empty
+    assert ima_camp_df.iloc[0]['song'] == 'Astronaut'
+    assert not ima_place_df.empty
+    assert ima_place_df.iloc[0]['curator'] == 'Cookfy'
+
 

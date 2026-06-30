@@ -456,3 +456,43 @@ TO anon, authenticated USING (true);
 CREATE POLICY "Allow read access to anon users" 
 ON musosoup_placements FOR SELECT 
 TO anon, authenticated USING (true);
+
+-- Table: ima_campaigns
+CREATE TABLE IF NOT EXISTS ima_campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    song VARCHAR(255) NOT NULL,
+    campaign_date DATE,
+    budget_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    invoice_id VARCHAR(255),
+    package_name VARCHAR(255),
+    guaranteed_streams INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Table: ima_placements
+CREATE TABLE IF NOT EXISTS ima_placements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    song VARCHAR(255) NOT NULL,
+    playlist_name VARCHAR(255),
+    platform VARCHAR(50) DEFAULT 'Spotify',
+    curator VARCHAR(255),
+    followers INTEGER NOT NULL DEFAULT 0,
+    published_date DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE ima_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ima_placements ENABLE ROW LEVEL SECURITY;
+
+-- Policies
+DROP POLICY IF EXISTS "Allow read access to anon users" ON ima_campaigns;
+DROP POLICY IF EXISTS "Allow read access to anon users" ON ima_placements;
+
+CREATE POLICY "Allow read access to anon users" 
+ON ima_campaigns FOR SELECT 
+TO anon, authenticated USING (true);
+
+CREATE POLICY "Allow read access to anon users" 
+ON ima_placements FOR SELECT 
+TO anon, authenticated USING (true);
