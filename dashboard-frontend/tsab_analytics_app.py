@@ -264,10 +264,10 @@ with st.sidebar:
 dk_base_df = load_base_data("distrokid_royalties", "DistroKid/DistroKid Results 6.12.26.csv", DK_COLUMN_MAP)
 spot_base_df = load_base_data("spotify_campaign_metrics", "Spotify For Artists/Spotify Campaigns to date 6.12.26.csv", SPOTIFY_COLUMN_MAP)
 s4a_base_df = load_base_data("s4a_daily_streams", None, {})
-submithub_base_df = load_base_data("submithub_submissions", None, {})
-submithub_purchases_base_df = load_base_data("submithub_credit_purchases", None, {})
-pp_campaigns_base_df = load_base_data("playlist_push_campaigns", None, {})
-pp_placements_base_df = load_base_data("playlist_push_placements", None, {})
+submithub_base_df = load_base_data("submithub_submissions", "SubmitHub/submithub_submissions_merged.csv", {})
+submithub_purchases_base_df = load_base_data("submithub_credit_purchases", "SubmitHub/submithub_credit_purchases.csv", {})
+pp_campaigns_base_df = load_base_data("playlist_push_campaigns", "Playlist Push/playlist_push_campaigns.csv", {})
+pp_placements_base_df = load_base_data("playlist_push_placements", "Playlist Push/playlist_push_placements.csv", {})
 
 
 
