@@ -254,7 +254,8 @@ with st.sidebar:
     st.caption("📂 *Expects: Response page text (.txt), submission history (.csv), purchase history (.xlsx), or pre-merged CSV*")
 
     playlist_push_uploads = st.file_uploader("6. Add Playlist Push Data", type=["pdf", "csv"], accept_multiple_files=True)
-    st.caption("📂 *Expects: Campaign responses (.pdf), invoice (.pdf), or summary CSV*")
+    st.caption("📂 *Expects: (1) Campaign responses PDF (e.g. '[P] Campaign responses for_ Astronaut - Playlist Push.pdf'), (2) Campaign Invoice PDF (e.g. '[P] playlistpush-invoice-480065 - Astronaut.pdf'), or (3) Campaign summary CSV (e.g. 'Socially Acceptable - Playlist Push Campaign Results.csv')*")
+
 
 
 
@@ -1523,6 +1524,14 @@ with tab_pr:
             col_pp3.metric("💸 Total Spend", f"${total_cost:.2f}")
             col_pp4.metric("📢 Playlist Followers", f"{total_reach:,.0f}")
             col_pp5.metric("🎯 CPM Reach", f"${cpm_reach:.2f}" if total_reach > 0 else "$0.00", help="Cost Per 1,000 Playlist Followers Reached")
+            
+            st.warning("""
+            ⚠️ **Analytical Considerations for Playlist Push:**
+            * **High Cost Per Placement (CPA)**: The average cost per placement is **$33.00 - $56.00**, which is 5x to 10x higher than SubmitHub.
+            * **Follower Reach Skepticism**: Placements are curated automatically by Playlist Push. Monitor streaming lift closely to verify active listener engagement.
+            * **Date Attribution**: Placement dates are relative estimates (e.g., '4 months ago') derived from the report print times.
+            * **No Qualitative Feedback**: Unlike SubmitHub, Playlist Push exports provide no written curator reviews or critiques.
+            """)
             
             st.write("---")
             
