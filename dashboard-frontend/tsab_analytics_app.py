@@ -250,8 +250,9 @@ with st.sidebar:
     meta_uploads = st.file_uploader("4. Add Meta Ads", type="csv", accept_multiple_files=True)
     st.caption("📂 *Expects: Meta Ads CSV reports with columns 'Start Date' and 'Amount Spent (USD)'*")
 
-    submithub_uploads = st.file_uploader("5. Add SubmitHub Data", type=["txt", "csv"], accept_multiple_files=True)
-    st.caption("📂 *Expects: Copy-pasted response page text files (e.g., Faire Enough Response page text.txt) or custom CSVs*")
+    submithub_uploads = st.file_uploader("5. Add SubmitHub Data", type=["txt", "csv", "xlsx", "xls"], accept_multiple_files=True)
+    st.caption("📂 *Expects: Response page text (.txt), submission history (.csv), purchase history (.xlsx), or pre-merged CSV*")
+
 
 
 # Fetch Base Data from Supabase (with Fallbacks)
@@ -259,6 +260,8 @@ dk_base_df = load_base_data("distrokid_royalties", "DistroKid/DistroKid Results 
 spot_base_df = load_base_data("spotify_campaign_metrics", "Spotify For Artists/Spotify Campaigns to date 6.12.26.csv", SPOTIFY_COLUMN_MAP)
 s4a_base_df = load_base_data("s4a_daily_streams", None, {})
 submithub_base_df = load_base_data("submithub_submissions", None, {})
+submithub_purchases_base_df = load_base_data("submithub_credit_purchases", None, {})
+
 
 
 
@@ -365,7 +368,7 @@ def parse_raw_text_content(content, song_name):
     return curators
 
 @st.cache_data
-def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files, submithub_base_df, submithub_files):
+def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files, submithub_base_df, submithub_purchases_base_df, submithub_files):
     
     def stitch_data(base_df, uploaded_files):
         dfs = []
@@ -411,6 +414,211 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
     else:
         s4a_df = pd.DataFrame(columns=['date', 'streams', 'track_name'])
         
+    # --- SubmitHub Upload Classification & Parsing ---
+    xlsx_file = None
+    history_csv_file = None
+    text_files = []
+    pre_parsed_csvs = []
+    
+    if submithub_files:
+        for file in submithub_files:
+            if file.name.endswith('.xlsx') or file.name.endswith('.xls') or 'purchase' in file.name.lower():
+                xlsx_file = file
+            elif file.name.endswith('.csv'):
+                try:
+                    df_check = pd.read_csv(file, nrows=5)
+                    if 'Song' in df_check.columns and 'Outlet' in df_check.columns and 'Campaign date' in df_check.columns:
+                        history_csv_file = file
+                    else:
+                        pre_parsed_csvs.append(file)
+                except Exception:
+                    pre_parsed_csvs.append(file)
+            elif file.name.endswith('.txt') or 'text' in file.name.lower():
+                text_files.append(file)
+
+    # Resolve purchases list
+    uploaded_purchases = []
+    if xlsx_file:
+        try:
+            purchase_df = pd.read_excel(xlsx_file)
+            purchase_df.columns = purchase_df.columns.str.strip().str.lower()
+            if all(col in purchase_df.columns for col in ['date', 'paid', 'credits']):
+                for idx, row in purchase_df.iterrows():
+                    raw_date = row['date']
+                    p_date = pd.to_datetime(raw_date).isoformat() if not isinstance(raw_date, pd.Timestamp) else raw_date.isoformat()
+                    uploaded_purchases.append({
+                        'purchase_date': p_date,
+                        'amount_paid_usd': float(row['paid']),
+                        'credits_purchased': int(row['credits'])
+                    })
+        except Exception:
+            pass
+            
+    db_purchases = []
+    if not submithub_purchases_base_df.empty:
+        for idx, row in submithub_purchases_base_df.iterrows():
+            db_purchases.append({
+                'purchase_date': pd.to_datetime(row['purchase_date']).isoformat(),
+                'amount_paid_usd': float(row['amount_paid_usd']),
+                'credits_purchased': int(row['credits_purchased'])
+            })
+            
+    purchases = uploaded_purchases if uploaded_purchases else db_purchases
+
+    # Resolve master CSV
+    master_csv_df = pd.DataFrame()
+    if history_csv_file:
+        try:
+            master_csv_df = pd.read_csv(history_csv_file)
+        except Exception:
+            pass
+    else:
+        # Check local path fallback
+        fallback_path = "data-backend/SubmitHub/The Socially Acceptable Band submission history (Jun 29, 2026).csv"
+        if os.path.exists(fallback_path):
+            try:
+                master_csv_df = pd.read_csv(fallback_path)
+            except Exception:
+                pass
+
+    # Helper for cost calculation
+    def get_cost_per_credit(campaign_date_str, purchase_list):
+        if not purchase_list:
+            return 0.85
+        def to_naive(dt_val):
+            dt = pd.to_datetime(dt_val)
+            return dt.tz_localize(None) if dt.tzinfo is not None else dt
+        
+        try:
+            campaign_dt = to_naive(campaign_date_str)
+        except Exception:
+            campaign_dt = to_naive(pd.Timestamp.now())
+            
+        sorted_p = sorted(purchase_list, key=lambda x: to_naive(x['purchase_date']))
+        best_cost = None
+        for p in sorted_p:
+            p_dt = to_naive(p['purchase_date'])
+            if p_dt <= campaign_dt:
+                best_cost = p['amount_paid_usd'] / p['credits_purchased']
+        if best_cost is None:
+            first = sorted_p[0]
+            best_cost = first['amount_paid_usd'] / first['credits_purchased']
+        return best_cost
+
+    # Helper to process single song raw text
+    def process_single_song_submissions(song_name, parsed_curators, csv_df, purchase_list):
+        if csv_df.empty:
+            final_records = []
+            for curator in parsed_curators:
+                credits = curator['credits_spent']
+                cost_usd = 0.00 if curator['is_refunded'] else round(credits * 0.85, 2)
+                final_records.append({
+                    'song': song_name,
+                    'campaign_url': None,
+                    'campaign_date': None,
+                    'outlet': curator['outlet'],
+                    'outlet_type': curator['outlet_type'],
+                    'outlet_url': None,
+                    'outlet_country': None,
+                    'action': curator['status'],
+                    'action_timestamp': None,
+                    'feedback': curator['feedback'],
+                    'listen_time_seconds': None,
+                    'credits_spent': credits,
+                    'credit_type': curator['credit_type'],
+                    'is_refunded': curator['is_refunded'],
+                    'cost_usd': cost_usd,
+                    'share_destination': curator['share_destination'],
+                    'estimated_reach': curator['estimated_reach']
+                })
+            return final_records
+            
+        song_df = csv_df[csv_df['Song'].str.contains(song_name, case=False, na=False)].copy()
+        if song_df.empty:
+            final_records = []
+            for curator in parsed_curators:
+                credits = curator['credits_spent']
+                cost_usd = 0.00 if curator['is_refunded'] else round(credits * 0.85, 2)
+                final_records.append({
+                    'song': song_name,
+                    'campaign_url': None,
+                    'campaign_date': None,
+                    'outlet': curator['outlet'],
+                    'outlet_type': curator['outlet_type'],
+                    'outlet_url': None,
+                    'outlet_country': None,
+                    'action': curator['status'],
+                    'action_timestamp': None,
+                    'feedback': curator['feedback'],
+                    'listen_time_seconds': None,
+                    'credits_spent': credits,
+                    'credit_type': curator['credit_type'],
+                    'is_refunded': curator['is_refunded'],
+                    'cost_usd': cost_usd,
+                    'share_destination': curator['share_destination'],
+                    'estimated_reach': curator['estimated_reach']
+                })
+            return final_records
+            
+        grouped = song_df.groupby('Outlet')
+        final_records = []
+        for curator in parsed_curators:
+            curator_name = curator['outlet']
+            matched_group = None
+            for name, group in grouped:
+                if name.strip().lower() == curator_name.strip().lower():
+                    matched_group = group
+                    break
+            if matched_group is None:
+                campaign_url = None
+                campaign_date = None
+                outlet_url = None
+                outlet_country = None
+                action_timestamp = None
+                listen_time = None
+            else:
+                first_row = matched_group.iloc[0]
+                campaign_url = first_row.get('Campaign url')
+                campaign_date = first_row.get('Campaign date')
+                outlet_url = first_row.get('Outlet url')
+                outlet_country = first_row.get('Outlet country')
+                if pd.notna(campaign_date):
+                    campaign_date = pd.to_datetime(campaign_date).isoformat()
+                action_timestamp = pd.to_datetime(matched_group['Action timestamp']).max()
+                if pd.notna(action_timestamp):
+                    action_timestamp = action_timestamp.isoformat()
+                listen_time = int(matched_group['Listen time (seconds)'].max()) if pd.notna(matched_group['Listen time (seconds)'].max()) else None
+                
+            cost_per_credit = get_cost_per_credit(campaign_date or pd.Timestamp.now(), purchase_list)
+            credits_spent = curator['credits_spent']
+            if curator['is_refunded']:
+                cost_usd = 0.00
+            else:
+                cost_usd = round(credits_spent * cost_per_credit, 4)
+                
+            record = {
+                'song': song_name,
+                'campaign_url': campaign_url,
+                'campaign_date': campaign_date,
+                'outlet': curator_name,
+                'outlet_type': curator['outlet_type'],
+                'outlet_url': outlet_url,
+                'outlet_country': outlet_country,
+                'action': curator['status'],
+                'action_timestamp': action_timestamp,
+                'feedback': curator['feedback'],
+                'listen_time_seconds': listen_time,
+                'credits_spent': credits_spent,
+                'credit_type': curator['credit_type'],
+                'is_refunded': curator['is_refunded'],
+                'cost_usd': cost_usd,
+                'share_destination': curator['share_destination'],
+                'estimated_reach': curator['estimated_reach']
+            }
+            final_records.append(record)
+        return final_records
+
+    # Main uploader processing logic
     submithub_dataframes = []
     if not submithub_base_df.empty:
         submithub_base_df['cost_usd'] = pd.to_numeric(submithub_base_df['cost_usd'], errors='coerce').fillna(0)
@@ -418,29 +626,30 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         submithub_base_df['estimated_reach'] = pd.to_numeric(submithub_base_df['estimated_reach'], errors='coerce')
         submithub_dataframes.append(submithub_base_df)
         
-    if submithub_files:
-        for file in submithub_files:
-            if file.name.endswith('.csv'):
-                try:
-                    df = pd.read_csv(file)
-                    submithub_dataframes.append(df)
-                except Exception:
-                    pass
-            elif file.name.endswith('.txt') or 'text' in file.name.lower():
-                try:
-                    content = file.getvalue().decode('utf-8', errors='ignore')
-                    song_name = file.name.replace(' response page text.txt', '').replace(' Response page text.txt', '').replace(' response page text', '').replace('.txt', '').strip()
-                    parsed = parse_raw_text_content(content, song_name)
-                    df = pd.DataFrame(parsed)
-                    if not df.empty:
-                        submithub_dataframes.append(df)
-                except Exception as e:
-                    pass
-                    
+    for file in pre_parsed_csvs:
+        try:
+            df = pd.read_csv(file)
+            submithub_dataframes.append(df)
+        except Exception:
+            pass
+            
+    for file in text_files:
+        try:
+            content = file.getvalue().decode('utf-8', errors='ignore')
+            song_name = file.name.replace(' response page text.txt', '').replace(' Response page text.txt', '').replace(' response page text', '').replace('.txt', '').strip()
+            parsed_curators = parse_raw_text_content(content, song_name)
+            merged = process_single_song_submissions(song_name, parsed_curators, master_csv_df, purchases)
+            df = pd.DataFrame(merged)
+            if not df.empty:
+                submithub_dataframes.append(df)
+        except Exception:
+            pass
+            
     if submithub_dataframes:
         submithub_df = pd.concat(submithub_dataframes, ignore_index=True).drop_duplicates(subset=['song', 'outlet'])
     else:
         submithub_df = pd.DataFrame(columns=['song', 'outlet', 'outlet_type', 'credits_spent', 'credit_type', 'status', 'feedback', 'is_refunded', 'cost_usd', 'estimated_reach'])
+
     
     if not meta_df.empty:
         meta_df['Start Date'] = pd.to_datetime(meta_df['Start Date'], errors='coerce')
@@ -464,7 +673,8 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
     return dk_df, spot_df, s4a_df, meta_df, submithub_df
 
 with st.spinner("Stitching and processing datasets..."):
-    dk_df, spot_df, s4a_df, meta_df, submithub_df = process_data(dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads, submithub_base_df, submithub_uploads)
+    dk_df, spot_df, s4a_df, meta_df, submithub_df = process_data(dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads, submithub_base_df, submithub_purchases_base_df, submithub_uploads)
+
 
 
 # --- INJECT DATA FRESHNESS CALLOUTS ---

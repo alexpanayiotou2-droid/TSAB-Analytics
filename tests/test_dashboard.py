@@ -126,6 +126,7 @@ def test_stitch_data_processing():
         s4a_files=None,
         meta_files=None,
         submithub_base_df=pd.DataFrame(),
+        submithub_purchases_base_df=pd.DataFrame(),
         submithub_files=None
     )
     
