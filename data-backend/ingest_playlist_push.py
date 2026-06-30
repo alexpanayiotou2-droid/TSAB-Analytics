@@ -206,81 +206,125 @@ def main():
             
     # Paths
     pp_dir = "data-backend/Playlist Push"
-    summary_csv_path = os.path.join(pp_dir, "Socially Acceptable - Playlist Push Campaign Results.csv")
-    
-    if not os.path.exists(summary_csv_path):
-        logger.error(f"Missing summary CSV file: {summary_csv_path}")
-        sys.exit(1)
-        
-    # Read summary CSV
-    summary_df = pd.read_csv(summary_csv_path)
-    summary_df.columns = summary_df.columns.str.strip().str.lower()
-    
+    # Read summary CSV if present, otherwise discover songs from PDF responses
     campaigns = []
     all_placements = []
     
-    # Map song filenames
-    # Walk directory to find PDF response files
-    for idx, row in summary_df.iterrows():
-        song_name = row['song'].strip()
-        budget_str = str(row['campaign budget']).replace('$', '').strip()
-        budget = float(budget_str)
-        responses_count = int(row['curator responses'])
-        adds = int(row['playlist adds'])
-        reach = int(str(row['playlist followers']).replace(',', '').strip())
-        popularity = int(row['spotify popularity']) if 'spotify popularity' in row else None
+    if os.path.exists(summary_csv_path):
+        logger.info(f"Found summary CSV: {summary_csv_path}")
+        summary_df = pd.read_csv(summary_csv_path)
+        summary_df.columns = summary_df.columns.str.strip().str.lower()
         
-        logger.info(f"Processing Song: '{song_name}' (Budget: ${budget})")
-        
-        # 1. Search for campaign responses PDF
-        resp_pdf_name = f"[P] Campaign responses for_ {song_name} - Playlist Push.pdf"
-        # Match case-insensitive just in case
-        resp_pdf_path = None
+        for idx, row in summary_df.iterrows():
+            song_name = row['song'].strip()
+            budget_str = str(row['campaign budget']).replace('$', '').strip()
+            budget = float(budget_str)
+            responses_count = int(row['curator responses'])
+            adds = int(row['playlist adds'])
+            reach = int(str(row['playlist followers']).replace(',', '').strip())
+            popularity = int(row['spotify popularity']) if 'spotify popularity' in row else None
+            
+            logger.info(f"Processing Song: '{song_name}' (Budget: ${budget})")
+            
+            # Find responses PDF
+            resp_pdf_name = f"[P] Campaign responses for_ {song_name} - Playlist Push.pdf"
+            resp_pdf_path = None
+            for f in os.listdir(pp_dir):
+                if f.lower() == resp_pdf_name.lower():
+                    resp_pdf_path = os.path.join(pp_dir, f)
+                    break
+                    
+            if not resp_pdf_path:
+                logger.warning(f"Could not find campaign responses PDF for song '{song_name}'. Skipping placements.")
+                continue
+                
+            placements, print_date = parse_responses_pdf(resp_pdf_path)
+            
+            inv_pdf_path = None
+            for f in os.listdir(pp_dir):
+                if 'invoice' in f.lower() and song_name.lower() in f.lower() and f.endswith('.pdf'):
+                    inv_pdf_path = os.path.join(pp_dir, f)
+                    break
+                    
+            campaign_date = None
+            if inv_pdf_path:
+                inv_data = parse_invoice_pdf(inv_pdf_path)
+                if inv_data:
+                    campaign_date = inv_data['issued_date'].isoformat()
+                    logger.info(f"Found invoice date for '{song_name}': {campaign_date}")
+            
+            if not campaign_date and placements:
+                oldest_placement = min(placements, key=lambda x: x['estimated_date'])
+                campaign_date = oldest_placement['estimated_date']
+                logger.info(f"Estimated campaign date for '{song_name}' from oldest placement: {campaign_date}")
+                
+            campaigns.append({
+                'song': song_name,
+                'campaign_date': campaign_date,
+                'budget_usd': budget,
+                'total_responses': responses_count,
+                'playlist_adds': adds,
+                'total_reach': reach,
+                'spotify_popularity': popularity
+            })
+            
+            for p in placements:
+                p['song'] = song_name
+                all_placements.append(p)
+    else:
+        logger.info("Summary CSV not found. Scanning responses PDFs to discover campaigns...")
         for f in os.listdir(pp_dir):
-            if f.lower() == resp_pdf_name.lower():
+            if f.lower().startswith("[p] campaign responses for_") and f.lower().endswith(".pdf"):
+                try:
+                    song_part = f[len("[P] Campaign responses for_"):]
+                    song_name = song_part.split("- Playlist Push")[0].strip()
+                except Exception:
+                    continue
+                
+                logger.info(f"Discovered Campaign for Song: '{song_name}'")
                 resp_pdf_path = os.path.join(pp_dir, f)
-                break
                 
-        if not resp_pdf_path:
-            logger.warning(f"Could not find campaign responses PDF for song '{song_name}'. Skipping placements.")
-            continue
-            
-        placements, print_date = parse_responses_pdf(resp_pdf_path)
-        
-        # 2. Check for Invoice PDF to get exact date
-        # Example format: [P] playlistpush-invoice-480065 - Astronaut.pdf
-        inv_pdf_path = None
-        for f in os.listdir(pp_dir):
-            if 'invoice' in f.lower() and song_name.lower() in f.lower() and f.endswith('.pdf'):
-                inv_pdf_path = os.path.join(pp_dir, f)
-                break
+                try:
+                    placements, print_date = parse_responses_pdf(resp_pdf_path)
+                except Exception as e:
+                    logger.error(f"Failed to parse responses PDF for {song_name}: {e}")
+                    continue
                 
-        campaign_date = None
-        if inv_pdf_path:
-            inv_data = parse_invoice_pdf(inv_pdf_path)
-            if inv_data:
-                campaign_date = inv_data['issued_date'].isoformat()
-                logger.info(f"Found invoice date for '{song_name}': {campaign_date}")
-        
-        # If no invoice, estimate campaign date based on the oldest placement
-        if not campaign_date and placements:
-            oldest_placement = min(placements, key=lambda x: x['estimated_date'])
-            campaign_date = oldest_placement['estimated_date']
-            logger.info(f"Estimated campaign date for '{song_name}' from oldest placement: {campaign_date}")
-            
-        campaigns.append({
-            'song': song_name,
-            'campaign_date': campaign_date,
-            'budget_usd': budget,
-            'total_responses': responses_count,
-            'playlist_adds': adds,
-            'total_reach': reach,
-            'spotify_popularity': popularity
-        })
-        
-        for p in placements:
-            p['song'] = song_name
-            all_placements.append(p)
+                inv_pdf_path = None
+                for f2 in os.listdir(pp_dir):
+                    if 'invoice' in f2.lower() and song_name.lower() in f2.lower() and f2.endswith('.pdf'):
+                        inv_pdf_path = os.path.join(pp_dir, f2)
+                        break
+                
+                campaign_date = None
+                budget = 0.0
+                if inv_pdf_path:
+                    inv_data = parse_invoice_pdf(inv_pdf_path)
+                    if inv_data:
+                        campaign_date = inv_data['issued_date'].isoformat() if inv_data['issued_date'] else None
+                        budget = inv_data['amount_paid'] or 0.0
+                        logger.info(f"Found invoice date for '{song_name}': {campaign_date}, Budget: ${budget}")
+                
+                if not campaign_date and placements:
+                    oldest_placement = min(placements, key=lambda x: x['estimated_date'])
+                    campaign_date = oldest_placement['estimated_date']
+                    logger.info(f"Estimated campaign date for '{song_name}' from oldest placement: {campaign_date}")
+                
+                total_saves = sum(p['saves'] for p in placements)
+                
+                campaigns.append({
+                    'song': song_name,
+                    'campaign_date': campaign_date,
+                    'budget_usd': budget,
+                    'total_responses': len(placements),
+                    'playlist_adds': len(placements),
+                    'total_reach': total_saves,
+                    'spotify_popularity': None
+                })
+                
+                for p in placements:
+                    p['song'] = song_name
+                    all_placements.append(p)
             
     # Validation summary
     logger.info("--- Data Parsing Validation Summary ---")

@@ -752,10 +752,10 @@ with st.sidebar:
                                         })
                                 i += 1
 
+                        camps = []
                         if summary_csv:
                             sdf = pd.read_csv(summary_csv)
                             sdf.columns = sdf.columns.str.strip().str.lower()
-                            camps = []
                             for idx, row in sdf.iterrows():
                                 song_name = row['song'].strip()
                                 budget_str = str(row['campaign budget']).replace('$', '').strip()
@@ -783,10 +783,37 @@ with st.sidebar:
                                     'total_reach': reach,
                                     'spotify_popularity': popularity
                                 })
-                            save_playlist_push_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(parsed_placements))
-                            st.toast("✅ Successfully saved Playlist Push data to Supabase!")
-                            st.cache_data.clear()
-                            st.rerun()
+                        else:
+                            songs = set(p['song'] for p in parsed_placements if p['song'])
+                            for song_name in songs:
+                                budget = 0.0
+                                campaign_date = None
+                                if song_name.lower() in invoices_data:
+                                    campaign_date = invoices_data[song_name.lower()]['issued_date']
+                                    if campaign_date:
+                                        campaign_date = campaign_date.isoformat()
+                                    budget = invoices_data[song_name.lower()]['amount_paid'] or 0.0
+                                
+                                song_placements = [p for p in parsed_placements if p['song'] and p['song'].lower() == song_name.lower()]
+                                if not campaign_date and song_placements:
+                                    oldest = min(song_placements, key=lambda x: x['estimated_date'])
+                                    campaign_date = oldest['estimated_date']
+                                    
+                                total_saves = sum(p['saves'] for p in song_placements)
+                                camps.append({
+                                    'song': song_name,
+                                    'campaign_date': campaign_date,
+                                    'budget_usd': budget,
+                                    'total_responses': len(song_placements),
+                                    'playlist_adds': len(song_placements),
+                                    'total_reach': total_saves,
+                                    'spotify_popularity': None
+                                })
+                                
+                        save_playlist_push_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(parsed_placements))
+                        st.toast("✅ Successfully saved Playlist Push data to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Failed to save data: {e}")
         else:
