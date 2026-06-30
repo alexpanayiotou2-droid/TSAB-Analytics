@@ -374,8 +374,73 @@ def save_playlist_push_to_db(url, key, campaigns_df, placements_df):
                     pass
             except Exception as e:
                 logger.error(f"Failed to insert placements: {e}")
-                raise e
+                return pd.DataFrame()
 
+def save_musosoup_to_db(url, key, campaigns_df, placements_df):
+    import urllib.parse
+    headers = {
+        'apikey': key,
+        'Authorization': f'Bearer {key}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+    }
+    ssl_context = ssl.create_default_context()
+    
+    # 1. Save campaigns (partitioned overwrite)
+    if not campaigns_df.empty:
+        songs = campaigns_df['song'].unique()
+        for song in songs:
+            quoted_song = urllib.parse.quote(song)
+            endpoint_camp = f"{url.rstrip('/')}/rest/v1/musosoup_campaigns?song=eq.{quoted_song}"
+            req = urllib.request.Request(endpoint_camp, headers=headers, method='DELETE')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception:
+                pass
+                
+            endpoint_place = f"{url.rstrip('/')}/rest/v1/musosoup_placements?song=eq.{quoted_song}"
+            req = urllib.request.Request(endpoint_place, headers=headers, method='DELETE')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception:
+                pass
+                
+        camp_records = campaigns_df.to_dict(orient='records')
+        for r in camp_records:
+            for k, v in r.items():
+                if isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
+                    r[k] = v.isoformat()
+                elif pd.isna(v):
+                    r[k] = None
+        endpoint = f"{url.rstrip('/')}/rest/v1/musosoup_campaigns"
+        payload = json.dumps(camp_records).encode('utf-8')
+        req = urllib.request.Request(endpoint, data=payload, headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, context=ssl_context) as resp:
+                pass
+        except Exception as e:
+            logger.error(f"Failed to insert campaigns: {e}")
+            raise e
+            
+        if not placements_df.empty:
+            place_records = placements_df.to_dict(orient='records')
+            for r in place_records:
+                for k, v in r.items():
+                    if isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
+                        r[k] = v.isoformat()
+                    elif pd.isna(v):
+                        r[k] = None
+            endpoint = f"{url.rstrip('/')}/rest/v1/musosoup_placements"
+            payload = json.dumps(place_records).encode('utf-8')
+            req = urllib.request.Request(endpoint, data=payload, headers=headers, method='POST')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception as e:
+                logger.error(f"Failed to insert placements: {e}")
+                raise e
 
 # --- 2. HYBRID DATA PIPELINE (APPEND LOGIC) ---
 with st.sidebar:
@@ -819,6 +884,126 @@ with st.sidebar:
         else:
             st.info("💡 Set Supabase credentials to save Playlist Push uploads permanently.")
 
+    musosoup_uploads = st.file_uploader("7. Add Musosoup Data", type=["csv", "pdf"], accept_multiple_files=True)
+    st.caption("📂 *Expects: (1) Campaign report CSV (e.g. 'Musosoup-Campaign-Report-SH2BA.csv') or (2) payment receipt PDF (e.g. 'Musosoup-payment-SH2BA.pdf')*")
+
+    # Ingest to DB Button for Musosoup
+    if musosoup_uploads:
+        if SUPABASE_URL and SUPABASE_KEY:
+            if st.button("💾 Save Musosoup Uploads to DB", key="save_ms_db_btn"):
+                with st.spinner("Processing and uploading Musosoup data..."):
+                    try:
+                        report_csvs = []
+                        payment_pdfs = []
+                        for file in musosoup_uploads:
+                            if file.name.endswith('.csv'):
+                                report_csvs.append(file)
+                            elif file.name.endswith('.pdf'):
+                                payment_pdfs.append(file)
+                                
+                        uploaded_payments = {}
+                        for file in payment_pdfs:
+                            reader = pypdf.PdfReader(file)
+                            text = ""
+                            for page in reader.pages:
+                                text += page.extract_text() + "\n"
+                            lines = [line.strip() for line in text.split('\n')]
+                            date_val = None
+                            amount = None
+                            song_name = None
+                            for i, line in enumerate(lines):
+                                if line.startswith('Date:'):
+                                    date_cand = line.replace('Date:', '').strip()
+                                    try:
+                                        date_val = pd.to_datetime(date_cand, dayfirst=True).date().isoformat()
+                                    except Exception:
+                                        pass
+                                elif 'Campaign activation' in line:
+                                    match = re.search(r'for\s+(?:Socially\s+Acceptable\s*-\s*)?([a-zA-Z0-9\s]+)', line, re.IGNORECASE)
+                                    if match:
+                                        song_name = match.group(1).strip()
+                                elif line.startswith('TOTAL'):
+                                    match = re.search(r'TOTAL\s+[^\d]*([\d\.]+)', line, re.IGNORECASE)
+                                    if match:
+                                        amount = float(match.group(1))
+                            if not song_name:
+                                fn = file.name.lower()
+                                for k in ['astronaut', 'great riddance', 'sh2ba']:
+                                    if k in fn:
+                                        song_name = k
+                                        break
+                            if song_name:
+                                uploaded_payments[song_name.lower()] = {
+                                    'song': song_name,
+                                    'date': date_val,
+                                    'amount': amount
+                                }
+                                
+                        camps = []
+                        placements = []
+                        for file in report_csvs:
+                            song_name = file.name.replace("Musosoup-Campaign-Report-", "").replace(".csv", "").strip()
+                            df = pd.read_csv(file)
+                            df.columns = df.columns.str.strip().str.lower()
+                            
+                            df['placement_type'] = df['completion_url'].apply(get_placement_type)
+                            playlist_adds = len(df[df['placement_type'] == 'Playlist'])
+                            other_adds = len(df) - playlist_adds
+                            
+                            budget_gbp = 36.00
+                            campaign_date = None
+                            song_key = song_name.lower()
+                            if song_key in uploaded_payments:
+                                budget_gbp = uploaded_payments[song_key]['amount'] or budget_gbp
+                                campaign_date = uploaded_payments[song_key]['date']
+                            elif song_key in CAMPAIGN_DEFAULTS:
+                                budget_gbp = CAMPAIGN_DEFAULTS[song_key]['budget_gbp']
+                                campaign_date = CAMPAIGN_DEFAULTS[song_key]['campaign_date']
+                                
+                            if not campaign_date and not df.empty:
+                                oldest_date = pd.to_datetime(df['completion_date']).min()
+                                campaign_date = oldest_date.date().isoformat()
+                                
+                            budget_usd = round(budget_gbp * GBP_TO_USD, 2)
+                            camps.append({
+                                'song': song_name,
+                                'campaign_date': campaign_date,
+                                'budget_gbp': budget_gbp,
+                                'budget_usd': budget_usd,
+                                'playlist_adds': playlist_adds,
+                                'other_adds': other_adds
+                            })
+                            
+                            for idx, row in df.iterrows():
+                                c_gbp = float(row.get('contribution', 0.0))
+                                c_usd = round(c_gbp * GBP_TO_USD, 2)
+                                comp_date = None
+                                if pd.notna(row.get('completion_date')):
+                                    try:
+                                        comp_date = pd.to_datetime(row['completion_date']).isoformat()
+                                    except Exception:
+                                        pass
+                                placements.append({
+                                    'song': song_name,
+                                    'curator': row.get('curator'),
+                                    'publication': row.get('publication'),
+                                    'completion_date': comp_date,
+                                    'accept_type': row.get('accept_type', 'Free'),
+                                    'contribution_gbp': c_gbp,
+                                    'contribution_usd': c_usd,
+                                    'completion_url': row.get('completion_url'),
+                                    'placement_type': row.get('placement_type')
+                                })
+                        if camps:
+                            save_musosoup_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(placements))
+                            st.toast("✅ Successfully saved Musosoup data to Supabase!")
+                            st.cache_data.clear()
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to save data: {e}")
+        else:
+            st.info("💡 Set Supabase credentials to save Musosoup uploads permanently.")
+
 
 
 
@@ -832,6 +1017,8 @@ submithub_base_df = load_base_data("submithub_submissions", "SubmitHub/submithub
 submithub_purchases_base_df = load_base_data("submithub_credit_purchases", "SubmitHub/submithub_credit_purchases.csv", {})
 pp_campaigns_base_df = load_base_data("playlist_push_campaigns", "Playlist Push/playlist_push_campaigns.csv", {})
 pp_placements_base_df = load_base_data("playlist_push_placements", "Playlist Push/playlist_push_placements.csv", {})
+ms_campaigns_base_df = load_base_data("musosoup_campaigns", "Musosoup/musosoup_campaigns.csv", {})
+ms_placements_base_df = load_base_data("musosoup_placements", "Musosoup/musosoup_placements.csv", {})
 
 
 
@@ -942,7 +1129,8 @@ def parse_raw_text_content(content, song_name):
 @st.cache_data
 def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files, 
                  submithub_base_df, submithub_purchases_base_df, submithub_files,
-                 pp_campaigns_base_df, pp_placements_base_df, pp_files):
+                 pp_campaigns_base_df, pp_placements_base_df, pp_files,
+                 ms_campaigns_base_df, ms_placements_base_df, ms_files):
     
     def stitch_data(base_df, uploaded_files):
         dfs = []
@@ -1519,6 +1707,220 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         pp_placements_df['playlist_index'] = pd.to_numeric(pp_placements_df['playlist_index'], errors='coerce').fillna(0)
         pp_placements_df['avg_duration_months'] = pd.to_numeric(pp_placements_df['avg_duration_months'], errors='coerce').fillna(0)
         
+    if not spot_df.empty:
+        spot_df['Start Date'] = pd.to_datetime(spot_df['Start Date'].astype(str).str.replace(' UTC', ''), errors='coerce')
+        spot_df['End Date'] = pd.to_datetime(spot_df['End Date'].astype(str).str.replace(' UTC', ''), errors='coerce')
+        spot_df['Spend'] = pd.to_numeric(spot_df['Spend'], errors='coerce').fillna(0)
+        spot_df['Converted Listeners'] = pd.to_numeric(spot_df['Converted Listeners'], errors='coerce').fillna(0)
+        spot_df['Save Rate'] = pd.to_numeric(spot_df['Save Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
+        spot_df['Intent Rate'] = pd.to_numeric(spot_df['Intent Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
+    
+    # --- Musosoup Processing ---
+    ms_campaigns_dfs = []
+    ms_placements_dfs = []
+    
+    if not ms_campaigns_base_df.empty:
+        ms_campaigns_dfs.append(ms_campaigns_base_df)
+    if not ms_placements_base_df.empty:
+        ms_placements_dfs.append(ms_placements_base_df)
+        
+    has_ms_uploads = False
+    if ms_files:
+        has_ms_uploads = True
+        report_csvs = []
+        payment_pdfs = []
+        for file in ms_files:
+            if file.name.endswith('.csv'):
+                report_csvs.append(file)
+            elif file.name.endswith('.pdf'):
+                payment_pdfs.append(file)
+                
+        # Parse payments
+        uploaded_payments = {}
+        for file in payment_pdfs:
+            try:
+                reader = pypdf.PdfReader(file)
+                text = ""
+                for page in reader.pages:
+                    text += page.extract_text() + "\n"
+                lines = [line.strip() for line in text.split('\n')]
+                date_val = None
+                amount = None
+                song_name = None
+                for i, line in enumerate(lines):
+                    if line.startswith('Date:'):
+                        date_cand = line.replace('Date:', '').strip()
+                        try:
+                            date_val = pd.to_datetime(date_cand, dayfirst=True).date().isoformat()
+                        except Exception:
+                            pass
+                    elif 'Campaign activation' in line:
+                        match = re.search(r'for\s+(?:Socially\s+Acceptable\s*-\s*)?([a-zA-Z0-9\s]+)', line, re.IGNORECASE)
+                        if match:
+                            song_name = match.group(1).strip()
+                    elif line.startswith('TOTAL'):
+                        match = re.search(r'TOTAL\s+[^\d]*([\d\.]+)', line, re.IGNORECASE)
+                        if match:
+                            amount = float(match.group(1))
+                if not song_name:
+                    fn = file.name.lower()
+                    for k in ['astronaut', 'great riddance', 'sh2ba']:
+                        if k in fn:
+                            song_name = k
+                            break
+                if song_name:
+                    uploaded_payments[song_name.lower()] = {
+                        'song': song_name,
+                        'date': date_val,
+                        'amount': amount
+                    }
+            except Exception:
+                pass
+                
+        # Parse reports
+        parsed_placements = []
+        camps = []
+        for file in report_csvs:
+            try:
+                song_name = file.name.replace("Musosoup-Campaign-Report-", "").replace(".csv", "").strip()
+                df = pd.read_csv(file)
+                df.columns = df.columns.str.strip().str.lower()
+                
+                df['placement_type'] = df['completion_url'].apply(get_placement_type)
+                playlist_adds = len(df[df['placement_type'] == 'Playlist'])
+                other_adds = len(df) - playlist_adds
+                
+                budget_gbp = 36.00
+                campaign_date = None
+                song_key = song_name.lower()
+                if song_key in uploaded_payments:
+                    budget_gbp = uploaded_payments[song_key]['amount'] or budget_gbp
+                    campaign_date = uploaded_payments[song_key]['date']
+                elif song_key in CAMPAIGN_DEFAULTS:
+                    budget_gbp = CAMPAIGN_DEFAULTS[song_key]['budget_gbp']
+                    campaign_date = CAMPAIGN_DEFAULTS[song_key]['campaign_date']
+                    
+                if not campaign_date and not df.empty:
+                    oldest_date = pd.to_datetime(df['completion_date']).min()
+                    campaign_date = oldest_date.date().isoformat()
+                    
+                budget_usd = round(budget_gbp * GBP_TO_USD, 2)
+                
+                camps.append({
+                    'song': song_name,
+                    'campaign_date': campaign_date,
+                    'budget_gbp': budget_gbp,
+                    'budget_usd': budget_usd,
+                    'playlist_adds': playlist_adds,
+                    'other_adds': other_adds
+                })
+                
+                for idx, row in df.iterrows():
+                    c_gbp = float(row.get('contribution', 0.0))
+                    c_usd = round(c_gbp * GBP_TO_USD, 2)
+                    comp_date = None
+                    if pd.notna(row.get('completion_date')):
+                        try:
+                            comp_date = pd.to_datetime(row['completion_date']).isoformat()
+                        except Exception:
+                            pass
+                    parsed_placements.append({
+                        'song': song_name,
+                        'curator': row.get('curator'),
+                        'publication': row.get('publication'),
+                        'completion_date': comp_date,
+                        'accept_type': row.get('accept_type', 'Free'),
+                        'contribution_gbp': c_gbp,
+                        'contribution_usd': c_usd,
+                        'completion_url': row.get('completion_url'),
+                        'placement_type': row.get('placement_type')
+                    })
+            except Exception:
+                pass
+                
+        if camps:
+            ms_campaigns_dfs.append(pd.DataFrame(camps))
+        if parsed_placements:
+            ms_placements_dfs.append(pd.DataFrame(parsed_placements))
+            
+    if not has_ms_uploads and ms_campaigns_base_df.empty:
+        muso_dir = "data-backend/Musosoup"
+        if os.path.exists(muso_dir):
+            try:
+                local_csvs = [f for f in os.listdir(muso_dir) if f.startswith("Musosoup-Campaign-Report-") and f.endswith(".csv")]
+                camps = []
+                local_placements = []
+                for rf in local_csvs:
+                    song_name = rf.replace("Musosoup-Campaign-Report-", "").replace(".csv", "").strip()
+                    df = pd.read_csv(os.path.join(muso_dir, rf))
+                    df.columns = df.columns.str.strip().str.lower()
+                    
+                    df['placement_type'] = df['completion_url'].apply(get_placement_type)
+                    playlist_adds = len(df[df['placement_type'] == 'Playlist'])
+                    other_adds = len(df) - playlist_adds
+                    
+                    budget_gbp = 36.00
+                    campaign_date = None
+                    song_key = song_name.lower()
+                    if song_key in CAMPAIGN_DEFAULTS:
+                        budget_gbp = CAMPAIGN_DEFAULTS[song_key]['budget_gbp']
+                        campaign_date = CAMPAIGN_DEFAULTS[song_key]['campaign_date']
+                    if not campaign_date and not df.empty:
+                        oldest_date = pd.to_datetime(df['completion_date']).min()
+                        campaign_date = oldest_date.date().isoformat()
+                        
+                    budget_usd = round(budget_gbp * GBP_TO_USD, 2)
+                    camps.append({
+                        'song': song_name,
+                        'campaign_date': campaign_date,
+                        'budget_gbp': budget_gbp,
+                        'budget_usd': budget_usd,
+                        'playlist_adds': playlist_adds,
+                        'other_adds': other_adds
+                    })
+                    for idx, row in df.iterrows():
+                        c_gbp = float(row.get('contribution', 0.0))
+                        c_usd = round(c_gbp * GBP_TO_USD, 2)
+                        comp_date = None
+                        if pd.notna(row.get('completion_date')):
+                            comp_date = pd.to_datetime(row['completion_date']).isoformat()
+                        local_placements.append({
+                            'song': song_name,
+                            'curator': row.get('curator'),
+                            'publication': row.get('publication'),
+                            'completion_date': comp_date,
+                            'accept_type': row.get('accept_type', 'Free'),
+                            'contribution_gbp': c_gbp,
+                            'contribution_usd': c_usd,
+                            'completion_url': row.get('completion_url'),
+                            'placement_type': row.get('placement_type')
+                        })
+                if camps:
+                    ms_campaigns_dfs.append(pd.DataFrame(camps))
+                if local_placements:
+                    ms_placements_dfs.append(pd.DataFrame(local_placements))
+            except Exception:
+                pass
+                
+    if ms_campaigns_dfs:
+        ms_campaigns_df = pd.concat(ms_campaigns_dfs, ignore_index=True).drop_duplicates(subset=['song'])
+    else:
+        ms_campaigns_df = pd.DataFrame(columns=['song', 'campaign_date', 'budget_gbp', 'budget_usd', 'playlist_adds', 'other_adds'])
+        
+    if ms_placements_dfs:
+        ms_placements_df = pd.concat(ms_placements_dfs, ignore_index=True).drop_duplicates(subset=['song', 'completion_url'])
+    else:
+        ms_placements_df = pd.DataFrame(columns=['song', 'curator', 'publication', 'completion_date', 'accept_type', 'contribution_gbp', 'contribution_usd', 'completion_url', 'placement_type'])
+
+    if not ms_campaigns_df.empty:
+        ms_campaigns_df['budget_usd'] = pd.to_numeric(ms_campaigns_df['budget_usd'], errors='coerce').fillna(0)
+        ms_campaigns_df['budget_gbp'] = pd.to_numeric(ms_campaigns_df['budget_gbp'], errors='coerce').fillna(0)
+        ms_campaigns_df['playlist_adds'] = pd.to_numeric(ms_campaigns_df['playlist_adds'], errors='coerce').fillna(0)
+        ms_campaigns_df['other_adds'] = pd.to_numeric(ms_campaigns_df['other_adds'], errors='coerce').fillna(0)
+    if not ms_placements_df.empty:
+        ms_placements_df['contribution_gbp'] = pd.to_numeric(ms_placements_df['contribution_gbp'], errors='coerce').fillna(0)
+        ms_placements_df['contribution_usd'] = pd.to_numeric(ms_placements_df['contribution_usd'], errors='coerce').fillna(0)
+
     if not meta_df.empty:
         meta_df['Start Date'] = pd.to_datetime(meta_df['Start Date'], errors='coerce')
         meta_df['Amount Spent (USD)'] = pd.to_numeric(meta_df['Amount Spent (USD)'], errors='coerce').fillna(0)
@@ -1529,22 +1931,15 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         dk_df['Reporting Date'] = pd.to_datetime(dk_df['Reporting Date'], errors='coerce')
         dk_df['Earnings (USD)'] = pd.to_numeric(dk_df['Earnings (USD)'], errors='coerce').fillna(0)
         dk_df['Quantity'] = pd.to_numeric(dk_df['Quantity'], errors='coerce').fillna(0)
-    
-    if not spot_df.empty:
-        spot_df['Start Date'] = pd.to_datetime(spot_df['Start Date'].astype(str).str.replace(' UTC', ''), errors='coerce')
-        spot_df['End Date'] = pd.to_datetime(spot_df['End Date'].astype(str).str.replace(' UTC', ''), errors='coerce')
-        spot_df['Spend'] = pd.to_numeric(spot_df['Spend'], errors='coerce').fillna(0)
-        spot_df['Converted Listeners'] = pd.to_numeric(spot_df['Converted Listeners'], errors='coerce').fillna(0)
-        spot_df['Save Rate'] = pd.to_numeric(spot_df['Save Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
-        spot_df['Intent Rate'] = pd.to_numeric(spot_df['Intent Rate'].astype(str).str.replace('%', ''), errors='coerce').fillna(0)
-    
-    return dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df
+
+    return dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df, ms_campaigns_df, ms_placements_df
 
 with st.spinner("Stitching and processing datasets..."):
-    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df = process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df, ms_campaigns_df, ms_placements_df = process_data(
         dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads, 
         submithub_base_df, submithub_purchases_base_df, submithub_uploads,
-        pp_campaigns_base_df, pp_placements_base_df, playlist_push_uploads
+        pp_campaigns_base_df, pp_placements_base_df, playlist_push_uploads,
+        ms_campaigns_base_df, ms_placements_base_df, musosoup_uploads
     )
 
 
@@ -1583,6 +1978,8 @@ if selected_view != "All Catalog (Aggregate)":
     submithub_df = submithub_df[submithub_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not submithub_df.empty else submithub_df
     pp_campaigns_df = pp_campaigns_df[pp_campaigns_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not pp_campaigns_df.empty else pp_campaigns_df
     pp_placements_df = pp_placements_df[pp_placements_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not pp_placements_df.empty else pp_placements_df
+    ms_campaigns_df = ms_campaigns_df[ms_campaigns_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not ms_campaigns_df.empty else ms_campaigns_df
+    ms_placements_df = ms_placements_df[ms_placements_df['song'].str.contains(selected_view, case=False, na=False, regex=False)] if not ms_placements_df.empty else ms_placements_df
 
 
 
@@ -1732,16 +2129,19 @@ dk_anchor = dk_df['Reporting Date'].max() if not dk_df.empty else pd.Timestamp.n
 spot_anchor = spot_df['End Date'].max() if not spot_df.empty else pd.Timestamp.now()
 meta_anchor = meta_df['Start Date'].max() if not meta_df.empty else pd.Timestamp.now()
 submithub_anchor = pd.to_datetime(submithub_df['campaign_date'], errors='coerce').max() if not submithub_df.empty else pd.Timestamp.now()
-
-# Standardize date formats in submithub_df & pp_campaigns_df
+# Standardize date formats in submithub_df & pp_campaigns_df & ms_campaigns_df
 if not submithub_df.empty:
     submithub_df['campaign_date'] = pd.to_datetime(submithub_df['campaign_date'], errors='coerce')
     submithub_df['cost_usd'] = pd.to_numeric(submithub_df['cost_usd'], errors='coerce').fillna(0)
 if not pp_campaigns_df.empty:
     pp_campaigns_df['campaign_date'] = pd.to_datetime(pp_campaigns_df['campaign_date'], errors='coerce')
     pp_campaigns_df['budget_usd'] = pd.to_numeric(pp_campaigns_df['budget_usd'], errors='coerce').fillna(0)
+if not ms_campaigns_df.empty:
+    ms_campaigns_df['campaign_date'] = pd.to_datetime(ms_campaigns_df['campaign_date'], errors='coerce')
+    ms_campaigns_df['budget_usd'] = pd.to_numeric(ms_campaigns_df['budget_usd'], errors='coerce').fillna(0)
 
 pp_anchor = pd.to_datetime(pp_campaigns_df['campaign_date'], errors='coerce').max() if not pp_campaigns_df.empty else pd.Timestamp.now()
+ms_anchor = pd.to_datetime(ms_campaigns_df['campaign_date'], errors='coerce').max() if not ms_campaigns_df.empty else pd.Timestamp.now()
 
 if days_lookback:
     dk_current = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback)) & (dk_df['Reporting Date'] <= dk_anchor)] if not dk_df.empty else dk_df
@@ -1749,38 +2149,44 @@ if days_lookback:
     meta_current = meta_df[(meta_df['Start Date'] > meta_anchor - pd.Timedelta(days=days_lookback)) & (meta_df['Start Date'] <= meta_anchor)] if not meta_df.empty else meta_df
     submithub_current = submithub_df[(submithub_df['campaign_date'] > submithub_anchor - pd.Timedelta(days=days_lookback)) & (submithub_df['campaign_date'] <= submithub_anchor)] if not submithub_df.empty else submithub_df
     pp_current = pp_campaigns_df[(pp_campaigns_df['campaign_date'] > pp_anchor - pd.Timedelta(days=days_lookback)) & (pp_campaigns_df['campaign_date'] <= pp_anchor)] if not pp_campaigns_df.empty else pp_campaigns_df
+    ms_current = ms_campaigns_df[(ms_campaigns_df['campaign_date'] > ms_anchor - pd.Timedelta(days=days_lookback)) & (ms_campaigns_df['campaign_date'] <= ms_anchor)] if not ms_campaigns_df.empty else ms_campaigns_df
     
     dk_prior = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback*2)) & (dk_df['Reporting Date'] <= dk_anchor - pd.Timedelta(days=days_lookback))] if not dk_df.empty else dk_df
     spot_prior = spot_df[(spot_df['End Date'] > spot_anchor - pd.Timedelta(days=days_lookback*2)) & (spot_df['End Date'] <= spot_anchor - pd.Timedelta(days=days_lookback))] if not spot_df.empty else spot_df
     meta_prior = meta_df[(meta_df['Start Date'] > meta_anchor - pd.Timedelta(days=days_lookback*2)) & (meta_df['Start Date'] <= meta_anchor - pd.Timedelta(days=days_lookback))] if not meta_df.empty else meta_df
     submithub_prior = submithub_df[(submithub_df['campaign_date'] > submithub_anchor - pd.Timedelta(days=days_lookback*2)) & (submithub_df['campaign_date'] <= submithub_anchor - pd.Timedelta(days=days_lookback))] if not submithub_df.empty else submithub_df
     pp_prior = pp_campaigns_df[(pp_campaigns_df['campaign_date'] > pp_anchor - pd.Timedelta(days=days_lookback*2)) & (pp_campaigns_df['campaign_date'] <= pp_anchor - pd.Timedelta(days=days_lookback))] if not pp_campaigns_df.empty else pp_campaigns_df
+    ms_prior = ms_campaigns_df[(ms_campaigns_df['campaign_date'] > ms_anchor - pd.Timedelta(days=days_lookback*2)) & (ms_campaigns_df['campaign_date'] <= ms_anchor - pd.Timedelta(days=days_lookback))] if not ms_campaigns_df.empty else ms_campaigns_df
 else:
     dk_current = dk_df
     spot_current = spot_df
     meta_current = meta_df
     submithub_current = submithub_df
     pp_current = pp_campaigns_df
+    ms_current = ms_campaigns_df
     
     dk_prior = pd.DataFrame(columns=dk_df.columns if not dk_df.empty else [])
     spot_prior = pd.DataFrame(columns=spot_df.columns if not spot_df.empty else [])
     meta_prior = pd.DataFrame(columns=meta_df.columns if not meta_df.empty else [])
     submithub_prior = pd.DataFrame(columns=submithub_df.columns if not submithub_df.empty else [])
     pp_prior = pd.DataFrame(columns=pp_campaigns_df.columns if not pp_campaigns_df.empty else [])
+    ms_prior = pd.DataFrame(columns=ms_campaigns_df.columns if not ms_campaigns_df.empty else [])
 
-# Compute Blended Spend: Spotify + Meta + SubmitHub + Playlist Push
+# Compute Blended Spend: Spotify + Meta + SubmitHub + Playlist Push + Musosoup
 spend_current = (
     (spot_current['Spend'].sum() if not spot_current.empty else 0) + 
     (meta_current['Amount Spent (USD)'].sum() if not meta_current.empty else 0) + 
     (submithub_current['cost_usd'].sum() if not submithub_current.empty else 0) +
-    (pp_current['budget_usd'].sum() if not pp_current.empty else 0)
+    (pp_current['budget_usd'].sum() if not pp_current.empty else 0) +
+    (ms_current['budget_usd'].sum() if not ms_current.empty else 0)
 )
 earn_current = dk_current['Earnings (USD)'].sum() if not dk_current.empty else 0
-# Compute Blended Conversions: Spotify converted listeners + SubmitHub approvals + Playlist Push adds
+# Compute Blended Conversions: Spotify converted listeners + SubmitHub approvals + Playlist Push adds + Musosoup adds
 conv_current = (
     (spot_current['Converted Listeners'].sum() if not spot_current.empty else 0) + 
     (submithub_current[submithub_current['action'] == 'Approved'].shape[0] if not submithub_current.empty else 0) +
-    (pp_current['playlist_adds'].sum() if not pp_current.empty else 0)
+    (pp_current['playlist_adds'].sum() if not pp_current.empty else 0) +
+    ((ms_current['playlist_adds'].sum() + ms_current['other_adds'].sum()) if not ms_current.empty else 0)
 )
 streams_current = dk_current['Quantity'].sum() if not dk_current.empty else 0
 save_current = spot_current['Save Rate'].mean() if not spot_current.empty else 0
@@ -1792,21 +2198,21 @@ spend_prior = (
     (spot_prior['Spend'].sum() if not spot_prior.empty and 'Spend' in spot_prior.columns else 0) + 
     (meta_prior['Amount Spent (USD)'].sum() if not meta_prior.empty and 'Amount Spent (USD)' in meta_prior.columns else 0) + 
     (submithub_prior['cost_usd'].sum() if not submithub_prior.empty and 'cost_usd' in submithub_prior.columns else 0) +
-    (pp_prior['budget_usd'].sum() if not pp_prior.empty and 'budget_usd' in pp_prior.columns else 0)
+    (pp_prior['budget_usd'].sum() if not pp_prior.empty and 'budget_usd' in pp_prior.columns else 0) +
+    (ms_prior['budget_usd'].sum() if not ms_prior.empty and 'budget_usd' in ms_prior.columns else 0)
 )
 earn_prior = dk_prior['Earnings (USD)'].sum() if not dk_prior.empty and 'Earnings (USD)' in dk_prior.columns else 0
 conv_prior = (
     (spot_prior['Converted Listeners'].sum() if not spot_prior.empty and 'Converted Listeners' in spot_prior.columns else 0) + 
     (submithub_prior[submithub_prior['action'] == 'Approved'].shape[0] if not submithub_prior.empty else 0) +
-    (pp_prior['playlist_adds'].sum() if not pp_prior.empty and 'playlist_adds' in pp_prior.columns else 0)
+    (pp_prior['playlist_adds'].sum() if not pp_prior.empty and 'playlist_adds' in pp_prior.columns else 0) +
+    ((ms_prior['playlist_adds'].sum() + ms_prior['other_adds'].sum()) if not ms_prior.empty and 'playlist_adds' in ms_prior.columns else 0)
 )
 streams_prior = dk_prior['Quantity'].sum() if not dk_prior.empty and 'Quantity' in dk_prior.columns else 0
 save_prior = spot_prior['Save Rate'].mean() if not spot_prior.empty and 'Save Rate' in spot_prior.columns else 0
 
-
 roas_prior = (earn_prior / spend_prior) if spend_prior > 0 else 0
 cpa_prior = (spend_prior / conv_prior) if conv_prior > 0 else 0
-
 
 d_roas = roas_current - roas_prior if days_lookback else None
 d_cpa = cpa_current - cpa_prior if days_lookback else None
@@ -1973,7 +2379,7 @@ with tab_season:
 with tab_pr:
     st.markdown("### 📣 PR & Curator Outreach Performance")
     
-    pr_platform = st.radio("Select Outreach Platform", ["SubmitHub", "Playlist Push"], horizontal=True)
+    pr_platform = st.radio("Select Outreach Platform", ["SubmitHub", "Playlist Push", "Musosoup"], horizontal=True)
     
     if pr_platform == "SubmitHub":
         if submithub_df.empty:
@@ -2136,6 +2542,73 @@ with tab_pr:
                         'playlist_index': 'Playlist Position',
                         'avg_duration_months': 'Avg Duration (Months)',
                         'estimated_date': 'Estimated Date Added'
+                    }
+                )
+                st.dataframe(display_placements, use_container_width=True, hide_index=True)
+
+    elif pr_platform == "Musosoup":
+        if ms_campaigns_df.empty:
+            st.info("Awaiting Musosoup data. Seeding or uploading your reports/receipts will populate this view.")
+        else:
+            total_campaigns = ms_campaigns_df.shape[0]
+            total_playlist_adds = ms_campaigns_df['playlist_adds'].sum()
+            total_other_adds = ms_campaigns_df['other_adds'].sum()
+            total_placements = total_playlist_adds + total_other_adds
+            total_cost = ms_campaigns_df['budget_usd'].sum()
+            cpa = total_cost / total_placements if total_placements > 0 else 0
+            
+            col_ms1, col_ms2, col_ms3, col_ms4, col_ms5 = st.columns(5)
+            col_ms1.metric("📬 Campaigns Run", f"{total_campaigns}")
+            col_ms2.metric("💸 Total Spend", f"${total_cost:.2f}")
+            col_ms3.metric("🎵 Playlist Adds", f"{total_playlist_adds}")
+            col_ms4.metric("📢 Other Adds", f"{total_other_adds}")
+            col_ms5.metric("🎯 Blended CPA", f"${cpa:.2f}" if total_placements > 0 else "$0.00", help="Cost Per Approved Placement (including upfront registration fee)")
+            
+            st.warning("""
+            ⚠️ **Analytical Considerations for Musosoup:**
+            * **Upfront Campaign Fee**: Unlike SubmitHub, you pay a flat upfront campaign registration fee (£36 / ~$46.80 USD). There are no refunds for declines.
+            * **Reach Metrics**: Musosoup reports do not provide follower counts or saves for curators. 
+            * **Diversified Placements**: Musosoup campaigns tend to result in more diverse outcomes (e.g. blogs, social posts, SoundCloud features) alongside playlists.
+            """)
+            
+            st.write("---")
+            
+            col_ch1, col_ch2 = st.columns(2)
+            with col_ch1:
+                st.markdown("##### Placements by Song")
+                temp_camps = ms_campaigns_df.copy()
+                temp_camps['Total Placements'] = temp_camps['playlist_adds'] + temp_camps['other_adds']
+                chart_adds = alt.Chart(temp_camps).mark_bar().encode(
+                    x=alt.X('Total Placements:Q', title='Placements'),
+                    y=alt.Y('song:N', sort='-x', title=''),
+                    color=alt.value('#34D399')
+                )
+                st.altair_chart(chart_adds, use_container_width=True)
+                
+            with col_ch2:
+                st.markdown("##### Spend distribution by Song")
+                chart_spend = alt.Chart(ms_campaigns_df).mark_bar().encode(
+                    x=alt.X('budget_usd:Q', title='Spend (USD)'),
+                    y=alt.Y('song:N', sort='-x', title=''),
+                    color=alt.value('#FBAD30')
+                )
+                st.altair_chart(chart_spend, use_container_width=True)
+                
+            st.write("---")
+            
+            st.subheader("Approved Musosoup Placements")
+            if ms_placements_df.empty:
+                st.info("No placement details found.")
+            else:
+                display_placements = ms_placements_df[['song', 'curator', 'publication', 'accept_type', 'contribution_usd', 'placement_type', 'completion_url']].rename(
+                    columns={
+                        'song': 'Track Name',
+                        'curator': 'Curator Name',
+                        'publication': 'Outlet Name',
+                        'accept_type': 'Accept Type',
+                        'contribution_usd': 'Contribution (USD)',
+                        'placement_type': 'Placement Type',
+                        'completion_url': 'Link'
                     }
                 )
                 st.dataframe(display_placements, use_container_width=True, hide_index=True)

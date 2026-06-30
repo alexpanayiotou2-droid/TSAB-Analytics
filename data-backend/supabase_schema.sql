@@ -375,5 +375,84 @@ ON submithub_submissions FOR SELECT
 TO anon, authenticated USING (true);
 
 
+-- Table: playlist_push_campaigns
+CREATE TABLE IF NOT EXISTS playlist_push_campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    song VARCHAR(255) NOT NULL,
+    campaign_date TIMESTAMP WITH TIME ZONE,
+    budget_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    total_responses INTEGER NOT NULL DEFAULT 0,
+    playlist_adds INTEGER NOT NULL DEFAULT 0,
+    total_reach INTEGER NOT NULL DEFAULT 0,
+    spotify_popularity INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
 
+-- Table: playlist_push_placements
+CREATE TABLE IF NOT EXISTS playlist_push_placements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    song VARCHAR(255) NOT NULL,
+    playlist_name VARCHAR(255) NOT NULL,
+    curator VARCHAR(255) NOT NULL,
+    saves INTEGER NOT NULL DEFAULT 0,
+    added_time_ago VARCHAR(100),
+    estimated_date TIMESTAMP WITH TIME ZONE,
+    playlist_index INTEGER,
+    avg_duration_months INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
 
+-- Table: musosoup_campaigns
+CREATE TABLE IF NOT EXISTS musosoup_campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    song VARCHAR(255) NOT NULL,
+    campaign_date DATE,
+    budget_gbp NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    budget_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    playlist_adds INTEGER NOT NULL DEFAULT 0,
+    other_adds INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Table: musosoup_placements
+CREATE TABLE IF NOT EXISTS musosoup_placements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    song VARCHAR(255) NOT NULL,
+    curator VARCHAR(255),
+    publication VARCHAR(255),
+    completion_date TIMESTAMP WITH TIME ZONE,
+    accept_type VARCHAR(50),
+    contribution_gbp NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    contribution_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    completion_url TEXT,
+    placement_type VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE playlist_push_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE playlist_push_placements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE musosoup_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE musosoup_placements ENABLE ROW LEVEL SECURITY;
+
+-- Policies
+DROP POLICY IF EXISTS "Allow read access to anon users" ON playlist_push_campaigns;
+DROP POLICY IF EXISTS "Allow read access to anon users" ON playlist_push_placements;
+DROP POLICY IF EXISTS "Allow read access to anon users" ON musosoup_campaigns;
+DROP POLICY IF EXISTS "Allow read access to anon users" ON musosoup_placements;
+
+CREATE POLICY "Allow read access to anon users" 
+ON playlist_push_campaigns FOR SELECT 
+TO anon, authenticated USING (true);
+
+CREATE POLICY "Allow read access to anon users" 
+ON playlist_push_placements FOR SELECT 
+TO anon, authenticated USING (true);
+
+CREATE POLICY "Allow read access to anon users" 
+ON musosoup_campaigns FOR SELECT 
+TO anon, authenticated USING (true);
+
+CREATE POLICY "Allow read access to anon users" 
+ON musosoup_placements FOR SELECT 
+TO anon, authenticated USING (true);
