@@ -255,10 +255,11 @@ with st.sidebar:
 
 
 # Fetch Base Data from Supabase (with Fallbacks)
-dk_base_df = load_base_data("distrokid_royalties", "DistroKid Results 6.12.26.csv", DK_COLUMN_MAP)
-spot_base_df = load_base_data("spotify_campaign_metrics", "Spotify Campaigns to date 6.12.26.csv", SPOTIFY_COLUMN_MAP)
+dk_base_df = load_base_data("distrokid_royalties", "DistroKid/DistroKid Results 6.12.26.csv", DK_COLUMN_MAP)
+spot_base_df = load_base_data("spotify_campaign_metrics", "Spotify For Artists/Spotify Campaigns to date 6.12.26.csv", SPOTIFY_COLUMN_MAP)
 s4a_base_df = load_base_data("s4a_daily_streams", None, {})
 submithub_base_df = load_base_data("submithub_submissions", None, {})
+
 
 
 if (dk_base_df.empty and not dk_uploads) or (spot_base_df.empty and not spot_uploads):
