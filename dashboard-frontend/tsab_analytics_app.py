@@ -2800,9 +2800,13 @@ else:
 st.divider()
 
 st.subheader(f"🌍 Trends: {selected_timeframe}")
-tab_core, tab_season, tab_pr = st.tabs(["📈 Core Trends", "🍂 Seasonality Analysis", "📣 PR & Curator Outreach"])
+tab_trends, tab_strategy, tab_playbook = st.tabs([
+    "📊 Performance Trends", 
+    "🧠 Strategic Investment & Timing", 
+    "🎯 July 3rd Launch Playbook"
+])
 
-with tab_core:
+with tab_trends:
     col_v1, col_v2 = st.columns([1, 1])
     with col_v1:
         if not dk_current.empty:
@@ -2842,91 +2846,8 @@ with tab_core:
         else:
             st.write("No store data available for this timeframe.")
 
-with tab_season:
-    # Build Seasonality Comparison Dataset dynamically
-    # Group campaigns into seasons based on Start Date:
-    # Spring = March/April/May | Summer = June/July/August | Autumn = September/October/November
-    if not spot_df.empty:
-        season_tracks = []
-        for name in spot_df['Release Name'].unique():
-            track_spot = spot_df[spot_df['Release Name'] == name]
-            track_dk = dk_df[dk_df['Title'] == name] if not dk_df.empty else pd.DataFrame()
-            
-            # Map start date to season
-            start_date = track_spot['Start Date'].min()
-            if pd.isna(start_date): continue
-            
-            month = start_date.month
-            if month in [3, 4, 5]: season = "Spring"
-            elif month in [6, 7, 8]: season = "Summer"
-            elif month in [9, 10, 11]: season = "Autumn"
-            else: season = "Winter"
-            
-            # Aggregate metrics
-            spend = track_spot['Spend'].sum()
-            conv = track_spot['Converted Listeners'].sum()
-            cpa = spend / conv if conv > 0 else 0
-            
-            # Spotify ROAS = Spotify Earnings / Spotify Spend
-            spot_earnings = track_dk[track_dk['Store'].str.contains('Spotify', na=False, case=False)]['Earnings (USD)'].sum() if not track_dk.empty else 0
-            roas = spot_earnings / spend if spend > 0 else 0
-            
-            # Trailing 7-day average daily streams from S4A
-            track_s4a = s4a_df[s4a_df['track_name'].str.contains(name, case=False, na=False, regex=False)] if not s4a_df.empty else pd.DataFrame()
-            recent_streams = 0.0
-            if not track_s4a.empty:
-                daily_s4a = track_s4a.groupby('date')['streams'].sum()
-                if not daily_s4a.empty:
-                    recent_streams = daily_s4a.tail(7).mean()
-            
-            season_tracks.append({
-                "Track": name,
-                "Season": season,
-                "CPA": cpa,
-                "ROAS": roas,
-                "Streams": recent_streams
-            })
-            
-        season_df = pd.DataFrame(season_tracks)
-        
-        if not season_df.empty:
-            season_summary = season_df.groupby('Season').agg({
-                'CPA': 'mean',
-                'ROAS': 'mean',
-                'Streams': 'mean'
-            }).reset_index()
-            
-            col_s1, col_s2, col_s3 = st.columns(3)
-            
-            with col_s1:
-                st.markdown("##### Avg CPA by Season")
-                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#FBAD30').encode(
-                    x=alt.X('Season:N', title=None),
-                    y=alt.Y('CPA:Q', title="Upfront CPA ($)"),
-                    tooltip=['Season', 'CPA']
-                ), use_container_width=True)
-                
-            with col_s2:
-                st.markdown("##### Avg Spotify ROAS")
-                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#E5E7EB').encode(
-                    x=alt.X('Season:N', title=None),
-                    y=alt.Y('ROAS:Q', title="ROAS (x)"),
-                    tooltip=['Season', 'ROAS']
-                ), use_container_width=True)
-                
-            with col_s3:
-                st.markdown("##### Avg Daily Streams")
-                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#FBAD30').encode(
-                    x=alt.X('Season:N', title=None),
-                    y=alt.Y('Streams:Q', title="Daily Streams"),
-                    tooltip=['Season', 'Streams']
-                ), use_container_width=True)
-        else:
-            st.write("Insufficient historical campaign data to run seasonal benchmarks.")
-    else:
-        st.write("Awaiting campaign data for seasonality charts.")
+    st.write("---")
 
-with tab_pr:
     st.markdown("### 📣 PR & Curator Outreach Performance")
     
     pr_platform = st.radio("Select Outreach Platform", ["SubmitHub", "Playlist Push", "Musosoup", "Indie Music Academy"], horizontal=True)
@@ -3183,7 +3104,7 @@ with tab_pr:
             st.warning(f"""
             ⚠️ **Analytical Considerations for Indie Music Academy:**
             * **Guaranteed Streams vs Actuals**: The campaign description promises **10,000 guaranteed streams**, but Indie Music Academy reports do not provide stream telemetry. Compare the Spotify for Artists daily stream lift during the campaign run window to evaluate delivery.
-            * **Upfront Flat Fee**: You pay a flat registration fee (\$297.00 USD) for a package. Placements are organic, but there are no individual refunds for decline rates.
+            * **Upfront Flat Fee**: You pay a flat registration fee ($297.00 USD) for a package. Placements are organic, but there are no individual refunds for decline rates.
             """)
             
             st.write("---")
@@ -3234,6 +3155,236 @@ with tab_pr:
                     use_container_width=True, 
                     hide_index=True
                 )
+
+with tab_strategy:
+    # Group campaigns into seasons based on Start Date:
+    if not spot_df.empty:
+        season_tracks = []
+        for name in spot_df['Release Name'].unique():
+            track_spot = spot_df[spot_df['Release Name'] == name]
+            track_dk = dk_df[dk_df['Title'] == name] if not dk_df.empty else pd.DataFrame()
+            
+            start_date = track_spot['Start Date'].min()
+            if pd.isna(start_date): continue
+            
+            month = start_date.month
+            if month in [3, 4, 5]: season = "Spring"
+            elif month in [6, 7, 8]: season = "Summer"
+            elif month in [9, 10, 11]: season = "Autumn"
+            else: season = "Winter"
+            
+            spend = track_spot['Spend'].sum()
+            conv = track_spot['Converted Listeners'].sum()
+            cpa = spend / conv if conv > 0 else 0
+            
+            spot_earnings = track_dk[track_dk['Store'].str.contains('Spotify', na=False, case=False)]['Earnings (USD)'].sum() if not track_dk.empty else 0
+            roas = spot_earnings / spend if spend > 0 else 0
+            
+            track_s4a = s4a_df[s4a_df['track_name'].str.contains(name, case=False, na=False, regex=False)] if not s4a_df.empty else pd.DataFrame()
+            recent_streams = 0.0
+            if not track_s4a.empty:
+                daily_s4a = track_s4a.groupby('date')['streams'].sum()
+                if not daily_s4a.empty:
+                    recent_streams = daily_s4a.tail(7).mean()
+            
+            season_tracks.append({
+                "Track": name,
+                "Season": season,
+                "CPA": cpa,
+                "ROAS": roas,
+                "Streams": recent_streams
+            })
+            
+        season_df = pd.DataFrame(season_tracks)
+        
+        if not season_df.empty:
+            season_summary = season_df.groupby('Season').agg({
+                'CPA': 'mean',
+                'ROAS': 'mean',
+                'Streams': 'mean'
+            }).reset_index()
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            
+            with col_s1:
+                st.markdown("##### Avg CPA by Season")
+                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#FBAD30').encode(
+                    x=alt.X('Season:N', title=None),
+                    y=alt.Y('CPA:Q', title="Upfront CPA ($)"),
+                    tooltip=['Season', 'CPA']
+                ), use_container_width=True)
+                
+            with col_s2:
+                st.markdown("##### Avg Spotify ROAS")
+                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#E5E7EB').encode(
+                    x=alt.X('Season:N', title=None),
+                    y=alt.Y('ROAS:Q', title="ROAS (x)"),
+                    tooltip=['Season', 'ROAS']
+                ), use_container_width=True)
+                
+            with col_s3:
+                st.markdown("##### Avg Daily Streams")
+                st.altair_chart(alt.Chart(season_summary).mark_bar(color='#FBAD30').encode(
+                    x=alt.X('Season:N', title=None),
+                    y=alt.Y('Streams:Q', title="Daily Streams"),
+                    tooltip=['Season', 'Streams']
+                ), use_container_width=True)
+        else:
+            st.write("Insufficient historical campaign data to run seasonal benchmarks.")
+    else:
+        st.write("Awaiting campaign data for seasonality charts.")
+
+with tab_playbook:
+    st.markdown("## 🎯 July 3rd Release: Agile Launch Playbook")
+    
+    # Slide-based navigation inside Streamlit
+    slide = st.radio(
+        "Navigate Playbook Slides", 
+        [
+            "1. Overview & Agile Plan", 
+            "2. Cost-Efficiency Audit", 
+            "3. Revenue Guardrails", 
+            "4. 4-Week Timeline", 
+            "5. Interactive Simulator"
+        ],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("---")
+    
+    if slide == "1. Overview & Agile Plan":
+        col_l, col_r = st.columns([1.2, 1])
+        with col_l:
+            st.markdown(
+                "### July 3 Release: The Agile Plan of Attack\n"
+                "Historically, our summer campaigns have hit structural friction. For example, **Great Riddance** (July release) yielded only a **0.14x Spotify ROAS** and immediate post-campaign baseline decay.\n\n"
+                "However, drawing hard conclusions from a sample size of **N = 1** is a statistical risk. The slump could have been track-specific, or due to ad creative choice.\n\n"
+                "**Our Strategy: The Agile Performance-First Framework**. We do not restrict our budget based on the calendar month. Instead, we run a short 7-day test and let real-time listener conversion metrics dictate our scale."
+            )
+        with col_r:
+            st.markdown(
+                "<div style='border: 1px solid rgba(255,255,255,0.08); border-left: 4.5px solid #FBAD30; border-radius: 8px; padding: 16px; background-color: rgba(255,255,255,0.02);'>"
+                "<h4 style='color: #FBAD30; margin-top:0;'>☀️ Summer Release Confounder</h4>"
+                "<p style='font-size: 0.9rem; margin-bottom: 0;'><b>N = 1 Sample Size:</b> Statistically low confidence for a hard summer ban. We run a 7-day agile pilot and let live metrics decide our budget.</p>"
+                "</div>", unsafe_allow_html=True
+            )
+            st.markdown("")
+            col_metric1, col_metric2 = st.columns(2)
+            col_metric1.metric("🌱 Spring CPA", "~$0.24", help="Optimal historical conversion range.")
+            col_metric2.metric("🍂 Autumn Tail", "+113%", help="High organic baseline lift (Astronaut).")
+
+    elif slide == "2. Cost-Efficiency Audit":
+        col_l, col_r = st.columns([1, 1.2])
+        with col_l:
+            st.markdown(
+                "### Zero-Asset Channel Cost-Efficiency\n"
+                "To launch this song, we audited all previous promotional channels that require **zero creative asset generation** (no video reels, banner designs, or ad copywriting).\n\n"
+                "*   **Musosoup** is our undisputed efficiency leader, delivering playlist placements at only **$0.62 per add**.\n"
+                "*   **Spotify Showcase** is a highly efficient direct conversion tool, yielding a **$0.30 CPA** (Cost per Converted Listener) and **$1.75 Cost per Save** using existing release artwork.\n"
+                "*   **SubmitHub** provides high quality at a moderate cost (**$8.87 per placement**)."
+            )
+        with col_r:
+            chart_data = pd.DataFrame({
+                'Channel': ['Musosoup', 'Spotify Showcase*', 'SubmitHub', 'Playlist Push', 'IMA Placements**'],
+                'Cost per Placement': [0.62, 0.30, 8.87, 44.25, 99.00]
+            })
+            
+            cpp_chart = alt.Chart(chart_data).mark_bar().encode(
+                x=alt.X('Cost per Placement:Q', title='Cost per Placement / Conversion (USD)'),
+                y=alt.Y('Channel:N', sort='x', title=''),
+                color=alt.condition(
+                    alt.datum.Channel == 'Musosoup',
+                    alt.value('#10B981'),
+                    alt.condition(
+                        alt.datum.Channel == 'Spotify Showcase*',
+                        alt.value('#10B981'),
+                        alt.value('#FBAD30')
+                    )
+                )
+            ).properties(height=220).interactive()
+            
+            st.altair_chart(cpp_chart, use_container_width=True)
+            st.caption("* Showcase value represents Cost Per Converted Listener. ** IMA guarantees 10,000 organic streams ($0.0297/stream).")
+
+    elif slide == "3. Revenue Guardrails":
+        col_l, col_r = st.columns([1, 1.2])
+        with col_l:
+            st.markdown(
+                "### The Phantom Spend Guardrail\n"
+                "In previous releases, we suffered from **Phantom Spend** (ad dollars driving high stream quantities that dilutes overall Earnings Per Stream).\n\n"
+                "A database audit reveals that **Facebook catalog streams** pay almost nothing (EPS of $0.000016), and **Tier 3 Spotify regions** pay up to 11x less than Tier 1 markets. We were buying cheap impressions that diluted our royalties."
+            )
+        with col_r:
+            st.markdown(
+                "<div style='border: 1px solid rgba(255,255,255,0.08); border-left: 4px solid #10B981; border-radius: 8px; padding: 12px; background-color: rgba(16, 185, 129, 0.03); margin-bottom: 12px;'>"
+                "<h5 style='color: #10B981; margin:0;'>🟢 TARGET (High-Payout Tier 1)</h5>"
+                "<p style='font-size: 0.85rem; margin: 4px 0 0 0;'><b>Markets:</b> US, UK/GB, Germany (DE), Canada (CA), Australia (AU). Maximize Earnings Per Stream.</p>"
+                "</div>", unsafe_allow_html=True
+            )
+            st.markdown(
+                "<div style='border: 1px solid rgba(255,255,255,0.08); border-left: 4px solid #EF4444; border-radius: 8px; padding: 12px; background-color: rgba(239, 68, 68, 0.03); margin-bottom: 12px;'>"
+                "<h5 style='color: #EF4444; margin:0;'>🔴 EXCLUDE (Low-Payout Tier 3)</h5>"
+                "<p style='font-size: 0.85rem; margin: 4px 0 0 0;'><b>Markets:</b> India (IN) <i>[11x lower than US]</i>, Philippines (PH) <i>[5x lower]</i>, Turkey (TR) <i>[6x lower]</i>.</p>"
+                "</div>", unsafe_allow_html=True
+            )
+            st.markdown(
+                "<div style='border: 1px solid rgba(255,255,255,0.08); border-left: 4px solid #EF4444; border-radius: 8px; padding: 12px; background-color: rgba(239, 68, 68, 0.03);'>"
+                "<h5 style='color: #EF4444; margin:0;'>🔴 EXCLUDE (Facebook Catalog Plays)</h5>"
+                "<p style='font-size: 0.85rem; margin: 4px 0 0 0;'><b>Format:</b> Exclude Facebook catalog streams (EPS: $0.000016). Direct all budget to Spotify Home sponsored recommendations.</p>"
+                "</div>", unsafe_allow_html=True
+            )
+
+    elif slide == "4. 4-Week Timeline":
+        st.markdown("### 4-Week Campaign Timeline & Budget Allocation ($500)")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(
+                "<div style='border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; min-height: 200px;'>"
+                "<h4 style='color: #FBAD30;'>1. Weeks 1-2: PR Seeding</h4>"
+                "<h5 style='color: #fff;'>Budget: $100</h5>"
+                "<p style='font-size: 0.85rem; color: #9ca3af;'>Launch Musosoup campaign ($50) and SubmitHub pitches ($50) on July 3rd. Collect early playlist additions at low cost. Hold Playlist Push/IMA.</p>"
+                "</div>", unsafe_allow_html=True
+            )
+        with col2:
+            st.markdown(
+                "<div style='border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; min-height: 200px;'>"
+                "<h4 style='color: #FBAD30;'>2. Week 3: Algorithmic</h4>"
+                "<h5 style='color: #fff;'>Budget: $150</h5>"
+                "<p style='font-size: 0.85rem; color: #9ca3af;'>Launch Spotify Showcase targeting active and lapsed listeners in Tier 1 countries only (US, UK, DE, CA, AU). Exclude Tier 3.</p>"
+                "</div>", unsafe_allow_html=True
+            )
+        with col3:
+            st.markdown(
+                "<div style='border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; min-height: 200px;'>"
+                "<h4 style='color: #FBAD30;'>3. Week 4: Scaling</h4>"
+                "<h5 style='color: #fff;'>Budget: $250</h5>"
+                "<p style='font-size: 0.85rem; color: #9ca3af;'>If Week 3 Showcase metrics hit target benchmarks (CPA < $0.25, Save Rate > 20%), scale up the campaign. Otherwise, halt spend and run organic.</p>"
+                "</div>", unsafe_allow_html=True
+            )
+
+    elif slide == "5. Interactive Simulator":
+        st.markdown("### Interactive Scaling Decision Sandbox")
+        col_l, col_r = st.columns([1, 1.2])
+        with col_l:
+            st.write("On Day 21 (Week 4), we must decide whether to deploy the remaining $250. Adjust the sliders on the right to simulate live Showcase telemetry and see our recommended action.")
+            st.write("**Target Benchmarks:**")
+            st.write("🎯 Blended CPA: **< $0.30**")
+            st.write("❤️ Save Rate: **> 20%**")
+            st.write("📈 14-Day Post-Campaign Baseline Lift: **> 50%**")
+        with col_r:
+            sim_cpa = st.slider("Simulated Upfront CPA", min_value=0.10, max_value=0.60, value=0.30, step=0.01, format="$%.2f")
+            sim_save = st.slider("Simulated Showcase Save Rate", min_value=5, max_value=35, value=15, step=1, format="%d%%")
+            
+            st.markdown("---")
+            if sim_cpa <= 0.25 and sim_save >= 20:
+                st.success("🟢 **SCALE (Star Investment)**: High direct listener acquisition and strong intent. Scale campaign by injecting the remaining $250 immediately.")
+            elif sim_cpa > 0.35 or sim_save < 12:
+                st.error("🔴 **CUT (Empty Calories)**: High CPA or very low save rate. Halt active promotional ad budgets immediately to protect capital. Let the track run organically.")
+            elif sim_save >= 20 and sim_cpa <= 0.30:
+                st.warning("🟡 **SEED (Algorithmic Seeder)**: High save rate (intent) and moderate CPA. Keep the testing budget going to trigger Spotify's Discover Weekly recommendations.")
+            else:
+                st.info("⚪ **TACTICAL HOLD**: Moderate conversion. Keep the current testing budget ($10/day) and test new ad creatives. Do not scale yet.")
 
 
 st.divider()
