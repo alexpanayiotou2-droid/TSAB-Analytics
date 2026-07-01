@@ -3237,19 +3237,30 @@ with tab_strategy:
 with tab_playbook:
     st.markdown("## 🎯 July 3rd Release: Agile Launch Playbook")
     
-    # Slide-based navigation inside Streamlit
-    slide = st.radio(
-        "Navigate Playbook Slides", 
-        [
-            "1. Overview & Agile Plan", 
-            "2. Cost-Efficiency Audit", 
-            "3. Revenue Guardrails", 
-            "4. 4-Week Timeline", 
-            "5. Interactive Simulator"
-        ],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
+    # Initialize slide session state if not set
+    if 'playbook_slide' not in st.session_state:
+        st.session_state.playbook_slide = "1. Overview & Agile Plan"
+
+    # Slide-based navigation via Sleek horizontal button controls
+    col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
+    
+    if col_btn1.button("1. Overview", use_container_width=True, type="primary" if st.session_state.playbook_slide == "1. Overview & Agile Plan" else "secondary"):
+        st.session_state.playbook_slide = "1. Overview & Agile Plan"
+        st.rerun()
+    if col_btn2.button("2. Cost-Audit", use_container_width=True, type="primary" if st.session_state.playbook_slide == "2. Cost-Efficiency Audit" else "secondary"):
+        st.session_state.playbook_slide = "2. Cost-Efficiency Audit"
+        st.rerun()
+    if col_btn3.button("3. Revenue Guard", use_container_width=True, type="primary" if st.session_state.playbook_slide == "3. Revenue Guardrails" else "secondary"):
+        st.session_state.playbook_slide = "3. Revenue Guardrails"
+        st.rerun()
+    if col_btn4.button("4. Timeline", use_container_width=True, type="primary" if st.session_state.playbook_slide == "4. 4-Week Timeline" else "secondary"):
+        st.session_state.playbook_slide = "4. 4-Week Timeline"
+        st.rerun()
+    if col_btn5.button("5. Simulator", use_container_width=True, type="primary" if st.session_state.playbook_slide == "5. Interactive Simulator" else "secondary"):
+        st.session_state.playbook_slide = "5. Interactive Simulator"
+        st.rerun()
+
+    slide = st.session_state.playbook_slide
     
     st.markdown("---")
     
@@ -3293,15 +3304,10 @@ with tab_playbook:
             cpp_chart = alt.Chart(chart_data).mark_bar().encode(
                 x=alt.X('Cost per Placement:Q', title='Cost per Placement / Conversion (USD)'),
                 y=alt.Y('Channel:N', sort='x', title=''),
-                color=alt.condition(
-                    alt.datum.Channel == 'Musosoup',
-                    alt.value('#10B981'),
-                    alt.condition(
-                        alt.datum.Channel == 'Spotify Showcase*',
-                        alt.value('#10B981'),
-                        alt.value('#FBAD30')
-                    )
-                )
+                color=alt.Color('Channel:N', scale=alt.Scale(
+                    domain=['Musosoup', 'Spotify Showcase*', 'SubmitHub', 'Playlist Push', 'IMA Placements**'],
+                    range=['#10B981', '#10B981', '#FBAD30', '#FBAD30', '#FBAD30']
+                ), legend=None)
             ).properties(height=220).interactive()
             
             st.altair_chart(cpp_chart, use_container_width=True)

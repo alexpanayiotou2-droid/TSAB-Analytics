@@ -22,6 +22,10 @@ class MockContextManagerAndCallable:
         return 0
     def __getattr__(self, name):
         return self
+    def __setattr__(self, name, value):
+        self.__dict__[name] = value
+    def __contains__(self, key):
+        return key in self.__dict__
 
 
 # Create robust mock for streamlit module to allow importing and running the dashboard app
@@ -59,6 +63,11 @@ class MockStreamlit:
         if options:
             return list(options)[0]
         return ""
+        
+    def slider(self, label, min_value=None, max_value=None, value=None, *args, **kwargs):
+        if value is not None:
+            return value
+        return 0.0
         
     def text_input(self, label, value="", *args, **kwargs):
         return value
