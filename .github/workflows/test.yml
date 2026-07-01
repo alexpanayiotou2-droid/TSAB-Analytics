@@ -25,6 +25,8 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r dashboard-frontend/requirements.txt
         pip install -r requirements-dev.txt
+        pip install -r analytics-mcp/requirements.txt
+        pip install -r strategy-agent/requirements.txt
 
     - name: Run preflight checks
       run: |
