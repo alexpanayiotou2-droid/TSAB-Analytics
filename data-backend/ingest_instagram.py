@@ -27,15 +27,27 @@ def clean_numeric(val, default=0.0):
         return default
     return num
 
-def parse_instagram_csv(file_path):
-    logger.info(f"Parsing Instagram CSV: {file_path}")
+def parse_instagram_file(file_path):
+    logger.info(f"Parsing Instagram file: {file_path}")
     try:
-        df = pd.read_csv(file_path)
+        if file_path.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(file_path)
+        else:
+            df = pd.read_csv(file_path)
+            
         campaigns = []
         for idx, row in df.iterrows():
-            # Reporting starts, Reporting ends, Ends dates
-            rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
-            rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+            # Check for actual start column first, then reporting starts
+            if 'Start' in df.columns:
+                rep_starts = pd.to_datetime(row.get('Start'), errors='coerce')
+            else:
+                rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
+                
+            if 'Reporting ends' in df.columns:
+                rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+            else:
+                rep_ends = pd.to_datetime(row.get('Ends'), errors='coerce')
+                
             ends = pd.to_datetime(row.get('Ends'), errors='coerce')
             
             c_name = row.get('Campaign name')
@@ -62,7 +74,7 @@ def parse_instagram_csv(file_path):
             
         return pd.DataFrame(campaigns)
     except Exception as e:
-        logger.error(f"Error parsing Instagram CSV: {e}")
+        logger.error(f"Error parsing Instagram file: {e}")
         return pd.DataFrame()
 
 def upload_to_supabase(url, key, campaigns_df):
@@ -110,14 +122,41 @@ def main():
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
     
-    target_file = "data-backend/Instagram/Insta Campaigns-Jun-1-2023-Jul-1-2026.csv"
-    if not os.path.exists(target_file):
-        logger.error(f"File not found: {target_file}")
+    xlsx_file = "data-backend/Instagram/Insta Campaigns-Jun-1-2023-Jul-1-2026.xlsx"
+    csv_file = "data-backend/Instagram/Insta Campaigns-Jun-1-2023-Jul-1-2026.csv"
+    
+    if os.path.exists(xlsx_file):
+        target_file = xlsx_file
+    elif os.path.exists(csv_file):
+        target_file = csv_file
+    else:
+        logger.error("No Instagram campaign data file found.")
         return
         
-    campaigns_df = parse_instagram_csv(target_file)
+    campaigns_df = parse_instagram_file(target_file)
     logger.info(f"Total Campaigns Parsed: {len(campaigns_df)}")
     
+    # Update local cache for offline/fallback mode
+    if not campaigns_df.empty:
+        local_cache = "data-backend/Instagram/instagram_campaigns.csv"
+        try:
+            cache_df = campaigns_df.copy()
+            if 'id' not in cache_df.columns:
+                import uuid
+                cache_df['id'] = [str(uuid.uuid4()) for _ in range(len(cache_df))]
+            if 'created_at' not in cache_df.columns:
+                import datetime
+                cache_df['created_at'] = datetime.datetime.now().isoformat()
+                
+            cols = ['id', 'reporting_starts', 'reporting_ends', 'campaign_name', 'campaign_delivery', 
+                    'results', 'result_indicator', 'reach', 'frequency', 'amount_spent_usd', 
+                    'ends_date', 'impressions', 'link_clicks', 'cpc_usd', 'ctr', 'clicks_all', 'created_at']
+            cols = [c for c in cols if c in cache_df.columns]
+            cache_df[cols].to_csv(local_cache, index=False)
+            logger.info(f"Updated local fallback cache: {local_cache}")
+        except Exception as e:
+            logger.error(f"Failed to update local cache: {e}")
+            
     if not url or not key:
         logger.warning("Supabase credentials not found in environment. Dry-run complete.")
         return

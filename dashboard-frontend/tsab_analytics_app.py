@@ -1294,8 +1294,8 @@ with st.sidebar:
         else:
             st.info("💡 Set Supabase credentials to save Indie Music Academy uploads permanently.")
 
-    instagram_uploads = st.file_uploader("9. Add Instagram Campaigns", type="csv", accept_multiple_files=True)
-    st.caption("📂 *Expects: Instagram Post Campaign CSV reports (e.g. 'Insta Campaigns-Jun-1-2023-Jul-1-2026.csv')*")
+    instagram_uploads = st.file_uploader("9. Add Instagram Campaigns", type=["csv", "xlsx"], accept_multiple_files=True)
+    st.caption("📂 *Expects: Instagram Post Campaign CSV or Excel reports (e.g. 'Insta Campaigns-Jun-1-2023-Jul-1-2026.xlsx')*")
 
     # Ingest to DB Button for Instagram
     if instagram_uploads:
@@ -1305,11 +1305,22 @@ with st.sidebar:
                     try:
                         dfs = []
                         for file in instagram_uploads:
-                            df = pd.read_csv(file)
+                            if file.name.endswith(('.xlsx', '.xls')):
+                                df = pd.read_excel(file)
+                            else:
+                                df = pd.read_csv(file)
                             campaigns = []
                             for idx, row in df.iterrows():
-                                rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
-                                rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+                                if 'Start' in df.columns:
+                                    rep_starts = pd.to_datetime(row.get('Start'), errors='coerce')
+                                else:
+                                    rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
+                                    
+                                if 'Reporting ends' in df.columns:
+                                    rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+                                else:
+                                    rep_ends = pd.to_datetime(row.get('Ends'), errors='coerce')
+                                    
                                 ends = pd.to_datetime(row.get('Ends'), errors='coerce')
                                 c_name = row.get('Campaign name')
                                 if pd.isna(c_name) or not str(c_name).strip():
@@ -2283,11 +2294,29 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
     if instagram_files:
         for file in instagram_files:
             try:
-                df = pd.read_csv(file)
+                is_excel = False
+                if hasattr(file, 'name'):
+                    is_excel = file.name.endswith(('.xlsx', '.xls'))
+                elif isinstance(file, str):
+                    is_excel = file.endswith(('.xlsx', '.xls'))
+                
+                if is_excel:
+                    df = pd.read_excel(file)
+                else:
+                    df = pd.read_csv(file)
+                    
                 campaigns = []
                 for idx, row in df.iterrows():
-                    rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
-                    rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+                    if 'Start' in df.columns:
+                        rep_starts = pd.to_datetime(row.get('Start'), errors='coerce')
+                    else:
+                        rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
+                        
+                    if 'Reporting ends' in df.columns:
+                        rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+                    else:
+                        rep_ends = pd.to_datetime(row.get('Ends'), errors='coerce')
+                        
                     ends = pd.to_datetime(row.get('Ends'), errors='coerce')
                     c_name = row.get('Campaign name')
                     if pd.isna(c_name) or not str(c_name).strip():
@@ -3003,17 +3032,19 @@ with tab_trends:
                     alt.Tooltip('date:T', title='Date', format='%Y-%m-%d'),
                     alt.Tooltip('streams:Q', title='Daily Streams', format=',')
                 ]
-            )
-            
-            chart = line
+            ).properties(height=260)
             
             if not instagram_df.empty:
-                rects = alt.Chart(instagram_df).mark_rect(
-                    opacity=0.25,
-                    color='#E1306C' # Instagram brand pink-red
+                # Gantt-style horizontal bars for campaigns
+                gantt = alt.Chart(instagram_df).mark_bar(
+                    height=14,
+                    color='#E1306C',
+                    opacity=0.75,
+                    cornerRadius=4
                 ).encode(
-                    x='reporting_starts:T',
+                    x=alt.X('reporting_starts:T', title=None),
                     x2='ends_date:T',
+                    y=alt.Y('campaign_name:N', title='IG Campaigns', sort='x', axis=alt.Axis(labelLimit=250, labelFontSize=10, title=None)),
                     tooltip=[
                         alt.Tooltip('campaign_name:N', title='Campaign'),
                         alt.Tooltip('reporting_starts:T', title='Starts', format='%Y-%m-%d'),
@@ -3022,10 +3053,14 @@ with tab_trends:
                         alt.Tooltip('reach:Q', title='Reach', format=','),
                         alt.Tooltip('link_clicks:Q', title='Link Clicks', format=',')
                     ]
-                )
-                chart = alt.layer(rects, line)
+                ).properties(height=140)
                 
-            st.altair_chart(chart.properties(height=350).interactive(), use_container_width=True)
+                # Stack them vertically and share the X-axis
+                chart = alt.vconcat(line, gantt).resolve_scale(x='shared').interactive()
+            else:
+                chart = line.interactive()
+                
+            st.altair_chart(chart, use_container_width=True)
             
             if not instagram_df.empty:
                 with st.expander("📂 View Instagram Campaigns Details Log"):
