@@ -1,0 +1,55 @@
+# TSAB Semantic Metrics and Classification Rules
+# This file serves as the semantic metric layer to guide AI data analysis.
+
+metrics:
+  blended_roas:
+    name: "Blended Return on Ad Spend"
+    description: "Total Net Revenue / (Total Ad Spend across Spotify Campaigns + Meta/IG Campaigns)"
+    formula: "total_net_revenue / total_ad_spend"
+    
+  upfront_cpa:
+    name: "Upfront Cost Per Acquisition"
+    description: "Total Ad Spend / Total Converted Listeners"
+    formula: "total_ad_spend / total_converted_listeners"
+    
+  average_save_rate:
+    name: "Average Save Rate"
+    description: "Total Saves / Total Listeners across active promotional tracks"
+    formula: "total_saves / total_listeners"
+    
+  phantom_spend:
+    name: "Phantom Spend"
+    description: "Campaign ad dollars spent on a track that is experiencing an active drop in algorithmic streaming momentum."
+    trigger: "Individual track's Earnings Per Stream (EPS) drops by 30% or more compared to its historical 28-day trailing delta baseline."
+
+classification_rules:
+  reinvestment_quadrants:
+    scale:
+      name: "Scale (Star Investments)"
+      description: "High direct ROAS (>= 1.0x) and strong baseline retention."
+      rules:
+        spotify_roas: ">= 1.0"
+        baseline_retention: "positive"
+        
+    seed:
+      name: "Seed (Algorithmic Seeder)"
+      description: "High save rates (> 20%) and low CPA (<= $0.30), but low direct ROAS. Good for feeding recommendations."
+      rules:
+        save_rate: "> 0.20"
+        cpa: "<= 0.30"
+        spotify_roas: "< 1.0"
+        
+    monitor:
+      name: "Monitor (Recent/Lag)"
+      description: "Released within the last 90 days. Zero reported royalties but high recent streams. Needs protection from premature budget cuts."
+      rules:
+        release_age_days: "< 90"
+        royalties: "== 0"
+        recent_streams: "high"
+        
+    cut:
+      name: "Cut (Empty Calories)"
+      description: "Low ROAS (< 0.50x) and rapid audience decay (60-day baseline lift <= 0.0). Stop paid campaigns."
+      rules:
+        spotify_roas: "< 0.50"
+        baseline_lift_60d: "<= 0.0"
