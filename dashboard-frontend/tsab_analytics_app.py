@@ -2799,16 +2799,18 @@ else:
 
 st.divider()
 
-st.subheader(f"🌍 Trends: {selected_timeframe}")
-tab_trends, tab_strategy, tab_playbook = st.tabs([
-    "📊 Performance Trends", 
-    "🧠 Strategic Investment & Timing", 
-    "🎯 July 3rd Launch Playbook"
+st.subheader(f"🌍 Analysis Dashboard: {selected_timeframe}")
+tab_trends, tab_pr, tab_strategy, tab_playbook = st.tabs([
+    "📊 Executive Trends", 
+    "📣 PR & Curator Outreach",
+    "🧠 Strategic Console", 
+    "🎯 Launch Playbook"
 ])
 
 with tab_trends:
     col_v1, col_v2 = st.columns([1, 1])
     with col_v1:
+        st.markdown("##### Geographic Stream Distribution (Top 5 Countries)")
         if not dk_current.empty:
             daily_country = dk_current.groupby(['Reporting Date', 'Country of Sale'])['Quantity'].sum().reset_index()
             if not daily_country.empty:
@@ -2830,6 +2832,7 @@ with tab_trends:
             st.write("No data available.")
 
     with col_v2:
+        st.markdown("##### Store Streaming Distribution")
         if not dk_current.empty:
             store_streams = dk_current.groupby('Store')['Quantity'].sum().reset_index().sort_values(by='Quantity', ascending=False).head(8)
             if not store_streams.empty:
@@ -2846,11 +2849,10 @@ with tab_trends:
         else:
             st.write("No store data available for this timeframe.")
 
-    st.write("---")
-
-    st.markdown("### 📣 PR & Curator Outreach Performance")
+with tab_pr:
+    st.markdown("### PR Channel Outreach & Placement Details")
     
-    pr_platform = st.radio("Select Outreach Platform", ["SubmitHub", "Playlist Push", "Musosoup", "Indie Music Academy"], horizontal=True)
+    pr_platform = st.radio("Select Platform Data to View", ["SubmitHub", "Playlist Push", "Musosoup", "Indie Music Academy"], horizontal=True)
     
     if pr_platform == "SubmitHub":
         if submithub_df.empty:
@@ -3157,6 +3159,7 @@ with tab_trends:
                 )
 
 with tab_strategy:
+    st.markdown("### Strategic Releases & Capital Reinvestment Benchmarks")
     # Group campaigns into seasons based on Start Date:
     if not spot_df.empty:
         season_tracks = []
@@ -3233,6 +3236,117 @@ with tab_strategy:
             st.write("Insufficient historical campaign data to run seasonal benchmarks.")
     else:
         st.write("Awaiting campaign data for seasonality charts.")
+
+    st.markdown("---")
+    
+    # 2. CMO Strategic Anomaly Brief
+    st.markdown("#### Dynamic CMO Anomaly Engine")
+    with st.expander("🤖 View & Copy Strategic Anomaly Brief", expanded=True):
+        st.code(ai_brief, language="markdown")
+    st.markdown("---")
+    
+    # 3. Reinvestment Console & Baseline Lift Table
+    st.markdown("#### Strategic Reinvestment Console")
+    st.markdown("Dynamic reinvestment allocation categories and Trailing 60-Day Baseline Retention indices.")
+    
+    if not spot_df.empty:
+        # 1. Run Dynamic Calculations Per Track
+        console_data = []
+        unique_names = list(set(spot_df['Release Name'].unique()).union(set(dk_df['Title'].unique()) if not dk_df.empty else []))
+        
+        for name in unique_names:
+            track_spot = spot_df[spot_df['Release Name'] == name] if not spot_df.empty else pd.DataFrame()
+            track_dk = dk_df[dk_df['Title'] == name] if not dk_df.empty else pd.DataFrame()
+            track_s4a = s4a_df[s4a_df['track_name'].str.contains(name, case=False, na=False, regex=False)] if not s4a_df.empty else pd.DataFrame()
+            
+            # Core Metrics
+            spend = track_spot['Spend'].sum() if not track_spot.empty else 0.0
+            conv = track_spot['Converted Listeners'].sum() if not track_spot.empty else 0.0
+            cpa = spend / conv if conv > 0 else 0.0
+            save_rate = track_spot['Save Rate'].mean() if not track_spot.empty else 0.0
+            
+            # Royalties
+            spot_earnings = track_dk[track_dk['Store'].str.contains('Spotify', na=False, case=False)]['Earnings (USD)'].sum() if not track_dk.empty else 0.0
+            roas = spot_earnings / spend if spend > 0 else 0.0
+            
+            # Baseline Retention Index (Layer C)
+            pre_avg, post_60_avg, lift = 0.0, 0.0, 0.0
+            if not track_spot.empty and not track_s4a.empty:
+                start_date = track_spot['Start Date'].min()
+                end_date = track_spot['End Date'].max()
+                daily_s4a = track_s4a.groupby('date')['streams'].sum()
+                
+                if not daily_s4a.empty and pd.notna(start_date) and pd.notna(end_date):
+                    pre_mask = (daily_s4a.index >= (start_date - pd.Timedelta(days=14))) & (daily_s4a.index < start_date)
+                    post_mask = (daily_s4a.index >= (end_date + pd.Timedelta(days=30))) & (daily_s4a.index <= (end_date + pd.Timedelta(days=60)))
+                    
+                    pre_avg = daily_s4a.loc[pre_mask].mean() if not daily_s4a.loc[pre_mask].empty else 0.0
+                    post_60_avg = daily_s4a.loc[post_mask].mean() if not daily_s4a.loc[post_mask].empty else 0.0
+                    
+                    if pre_avg == 0.0:
+                        lift = 1.0 if post_60_avg > 0 else 0.0
+                    else:
+                        lift = (post_60_avg / pre_avg) - 1.0
+                        
+            # Recent Streams (Current daily stream tail)
+            recent_s4a = 0.0
+            if not track_s4a.empty:
+                daily_s4a = track_s4a.groupby('date')['streams'].sum()
+                if not daily_s4a.empty:
+                    recent_s4a = daily_s4a.tail(7).mean()
+                    
+            # 2. Dynamic Classification Logic (Layer A)
+            is_monitor = False
+            if name == "Me To Tell You": # Reference Case validation hook
+                is_monitor = True
+            elif not track_spot.empty:
+                days_old = (pd.Timestamp.now() - track_spot['Start Date'].min()).days
+                is_monitor = (days_old <= 90) and (spot_earnings == 0.0)
+                
+            if is_monitor:
+                allocation = "📡 Monitor (Recent/Lag)"
+            elif roas >= 1.0 and lift > 0:
+                allocation = "🚀 Scale (Star Investment)"
+            elif save_rate > 20.0 and cpa <= 0.30 and roas < 1.0:
+                allocation = "🌱 Seed (Algorithmic Seeder)"
+            elif roas < 0.50 and lift <= 0.0 and spend > 0:
+                allocation = "⚠️ Cut (Empty Calories)"
+            elif spend > 0:
+                allocation = "⚖️ Tactical Hold"
+            else:
+                allocation = "Catalog (Unpromoted)"
+                
+            console_data.append({
+                "Track Name": name,
+                "Reinvestment Category": allocation,
+                "Spend": spend,
+                "Spotify ROAS": roas,
+                "Upfront CPA": cpa,
+                "Save Rate": save_rate,
+                "Pre-Campaign Avg": pre_avg,
+                "Post-Campaign 60d Avg": post_60_avg,
+                "60d Lift": lift
+            })
+            
+        console_df = pd.DataFrame(console_data)
+        # Hide tracks with zero spend and no active royalties to keep the list clean
+        console_df = console_df[(console_df['Spend'] > 0) | (console_df['Spotify ROAS'] > 0)].sort_values('Spend', ascending=False)
+        
+        # Styled data table
+        st.dataframe(
+            console_df.style.format({
+                'Spend': '${:,.2f}',
+                'Spotify ROAS': '{:.2f}x',
+                'Upfront CPA': '${:.3f}',
+                'Save Rate': '{:.1f}%',
+                'Pre-Campaign Avg': '{:.1f} streams',
+                'Post-Campaign 60d Avg': '{:.1f} streams',
+                '60d Lift': '{:+.1f}%'
+            }),
+            use_container_width=True
+        )
+    else:
+        st.info("Please load campaign records in the sidebar to generate the reinvestment console.")
 
 with tab_playbook:
     st.markdown("## 🎯 July 3rd Release: Agile Launch Playbook")
@@ -3391,116 +3505,3 @@ with tab_playbook:
                 st.warning("🟡 **SEED (Algorithmic Seeder)**: High save rate (intent) and moderate CPA. Keep the testing budget going to trigger Spotify's Discover Weekly recommendations.")
             else:
                 st.info("⚪ **TACTICAL HOLD**: Moderate conversion. Keep the current testing budget ($10/day) and test new ad creatives. Do not scale yet.")
-
-
-st.divider()
-
-
-st.subheader("🤖 Strategic Anomaly Engine (Ready for CMO)")
-st.markdown("Use the expander below to reveal your automated marketing breakdown.")
-
-with st.expander("🤖 View & Copy Strategic Anomaly Brief", expanded=False):
-    st.code(ai_brief, language="markdown")
-
-st.divider()
-st.subheader("🤖 Strategic Reinvestment Console")
-st.markdown("Dynamic reinvestment allocation categories and Trailing 60-Day Baseline Retention indices.")
-
-if not spot_df.empty:
-    # 1. Run Dynamic Calculations Per Track
-    console_data = []
-    unique_names = list(set(spot_df['Release Name'].unique()).union(set(dk_df['Title'].unique()) if not dk_df.empty else []))
-    
-    for name in unique_names:
-        track_spot = spot_df[spot_df['Release Name'] == name] if not spot_df.empty else pd.DataFrame()
-        track_dk = dk_df[dk_df['Title'] == name] if not dk_df.empty else pd.DataFrame()
-        track_s4a = s4a_df[s4a_df['track_name'].str.contains(name, case=False, na=False, regex=False)] if not s4a_df.empty else pd.DataFrame()
-        
-        # Core Metrics
-        spend = track_spot['Spend'].sum() if not track_spot.empty else 0.0
-        conv = track_spot['Converted Listeners'].sum() if not track_spot.empty else 0.0
-        cpa = spend / conv if conv > 0 else 0.0
-        save_rate = track_spot['Save Rate'].mean() if not track_spot.empty else 0.0
-        
-        # Royalties
-        spot_earnings = track_dk[track_dk['Store'].str.contains('Spotify', na=False, case=False)]['Earnings (USD)'].sum() if not track_dk.empty else 0.0
-        roas = spot_earnings / spend if spend > 0 else 0.0
-        
-        # Baseline Retention Index (Layer C)
-        pre_avg, post_60_avg, lift = 0.0, 0.0, 0.0
-        if not track_spot.empty and not track_s4a.empty:
-            start_date = track_spot['Start Date'].min()
-            end_date = track_spot['End Date'].max()
-            daily_s4a = track_s4a.groupby('date')['streams'].sum()
-            
-            if not daily_s4a.empty and pd.notna(start_date) and pd.notna(end_date):
-                pre_mask = (daily_s4a.index >= (start_date - pd.Timedelta(days=14))) & (daily_s4a.index < start_date)
-                post_mask = (daily_s4a.index >= (end_date + pd.Timedelta(days=30))) & (daily_s4a.index <= (end_date + pd.Timedelta(days=60)))
-                
-                pre_avg = daily_s4a.loc[pre_mask].mean() if not daily_s4a.loc[pre_mask].empty else 0.0
-                post_60_avg = daily_s4a.loc[post_mask].mean() if not daily_s4a.loc[post_mask].empty else 0.0
-                
-                if pre_avg == 0.0:
-                    lift = 1.0 if post_60_avg > 0 else 0.0
-                else:
-                    lift = (post_60_avg / pre_avg) - 1.0
-                    
-        # Recent Streams (Current daily stream tail)
-        recent_s4a = 0.0
-        if not track_s4a.empty:
-            daily_s4a = track_s4a.groupby('date')['streams'].sum()
-            if not daily_s4a.empty:
-                recent_s4a = daily_s4a.tail(7).mean()
-                
-        # 2. Dynamic Classification Logic (Layer A)
-        is_monitor = False
-        if name == "Me To Tell You": # Reference Case validation hook
-            is_monitor = True
-        elif not track_spot.empty:
-            days_old = (pd.Timestamp.now() - track_spot['Start Date'].min()).days
-            is_monitor = (days_old <= 90) and (spot_earnings == 0.0)
-            
-        if is_monitor:
-            allocation = "📡 Monitor (Recent/Lag)"
-        elif roas >= 1.0 and lift > 0:
-            allocation = "🚀 Scale (Star Investment)"
-        elif save_rate > 20.0 and cpa <= 0.30 and roas < 1.0:
-            allocation = "🌱 Seed (Algorithmic Seeder)"
-        elif roas < 0.50 and lift <= 0.0 and spend > 0:
-            allocation = "⚠️ Cut (Empty Calories)"
-        elif spend > 0:
-            allocation = "⚖️ Tactical Hold"
-        else:
-            allocation = "Catalog (Unpromoted)"
-            
-        console_data.append({
-            "Track Name": name,
-            "Reinvestment Category": allocation,
-            "Spend": spend,
-            "Spotify ROAS": roas,
-            "Upfront CPA": cpa,
-            "Save Rate": save_rate,
-            "Pre-Campaign Avg": pre_avg,
-            "Post-Campaign 60d Avg": post_60_avg,
-            "60d Lift": lift
-        })
-        
-    console_df = pd.DataFrame(console_data)
-    # Hide tracks with zero spend and no active royalties to keep the list clean
-    console_df = console_df[(console_df['Spend'] > 0) | (console_df['Spotify ROAS'] > 0)].sort_values('Spend', ascending=False)
-    
-    # Styled data table
-    st.dataframe(
-        console_df.style.format({
-            'Spend': '${:,.2f}',
-            'Spotify ROAS': '{:.2f}x',
-            'Upfront CPA': '${:.3f}',
-            'Save Rate': '{:.1f}%',
-            'Pre-Campaign Avg': '{:.1f} streams',
-            'Post-Campaign 60d Avg': '{:.1f} streams',
-            '60d Lift': '{:+.1f}%'
-        }),
-        use_container_width=True
-    )
-else:
-    st.info("Please load campaign records in the sidebar to generate the reinvestment console.")
