@@ -3456,31 +3456,54 @@ with tab_playbook:
             )
 
     elif slide == "4. 4-Week Timeline":
-        st.markdown("### 4-Week Campaign Timeline & Budget Allocation ($500)")
+        st.markdown("### 📅 4-Week Release Campaign Timeline")
+        st.markdown("Detailed channel checkpoints, budget targets, and strategic rules for the July 3rd launch.")
+        
         col1, col2, col3 = st.columns(3)
         with col1:
             st.markdown(
-                "<div style='border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; min-height: 200px;'>"
-                "<h4 style='color: #FBAD30;'>1. Weeks 1-2: PR Seeding</h4>"
-                "<h5 style='color: #fff;'>Budget: $100</h5>"
-                "<p style='font-size: 0.85rem; color: #9ca3af;'>Launch Musosoup campaign ($50) and SubmitHub pitches ($50) on July 3rd. Collect early playlist additions at low cost. Hold Playlist Push/IMA.</p>"
-                "</div>", unsafe_allow_html=True
+                """
+                <div style="border: 1px solid #E5E7EB; border-left: 5px solid #10B981; border-radius: 12px; padding: 20px; background-color: #FFFFFF; box-shadow: 0 4px 15px rgba(0,0,0,0.03); min-height: 400px; display: flex; flex-direction: column;">
+                    <h4 style="color: #059669; margin-top: 0; font-size: 1.15rem; font-weight: 700;">🌱 Step 1. Weeks 1-2: PR Seeding</h4>
+                    <h5 style="color: #1F2937; font-size: 0.95rem; font-weight: 600; margin-top: 5px; margin-bottom: 12px;">Budget Allocation: $100</h5>
+                    <ul style="font-size: 0.85rem; color: #4B5563; padding-left: 18px; line-height: 1.6; margin-bottom: 0;">
+                        <li><b>SubmitHub pitches ($50)</b>: You <b>MUST use Premium Credits</b> (not standard). This guarantees response times within 48 hours, yielding quick playlist additions and immediate curator reviews.</li>
+                        <li><b>Musosoup listing ($50)</b>: Launch a 3-week campaign. Accept only verified premium placement offers with high follower reach to maximize efficiency (historical average: $0.62 per add).</li>
+                        <li><b>Budget Holds</b>: Keep Playlist Push and Indie Music Academy budgets fully locked. Do not launch raw playlist campaigns before establishing organic listener signals.</li>
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
         with col2:
             st.markdown(
-                "<div style='border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; min-height: 200px;'>"
-                "<h4 style='color: #FBAD30;'>2. Week 3: Algorithmic</h4>"
-                "<h5 style='color: #fff;'>Budget: $150</h5>"
-                "<p style='font-size: 0.85rem; color: #9ca3af;'>Launch Spotify Showcase targeting active and lapsed listeners in Tier 1 countries only (US, UK, DE, CA, AU). Exclude Tier 3.</p>"
-                "</div>", unsafe_allow_html=True
+                """
+                <div style="border: 1px solid #E5E7EB; border-left: 5px solid #FBAD30; border-radius: 12px; padding: 20px; background-color: #FFFFFF; box-shadow: 0 4px 15px rgba(0,0,0,0.03); min-height: 400px; display: flex; flex-direction: column;">
+                    <h4 style="color: #D97706; margin-top: 0; font-size: 1.15rem; font-weight: 700;">📡 Step 2. Week 3: Algorithmic Seeding</h4>
+                    <h5 style="color: #1F2937; font-size: 0.95rem; font-weight: 600; margin-top: 5px; margin-bottom: 12px;">Budget Allocation: $150</h5>
+                    <ul style="font-size: 0.85rem; color: #4B5563; padding-left: 18px; line-height: 1.6; margin-bottom: 0;">
+                        <li><b>Spotify Showcase ($150)</b>: Launch sponsored recommendations to target active, lapsed, and super listeners. Focus budget solely on high-payout Tier 1 countries (US, UK, DE, CA, AU).</li>
+                        <li><b>Exclude Low-Payouts</b>: Do not direct ad budget to Tier 3 countries (India, Philippines, Turkey) or Facebook Catalog formats, which dilute royalties and cause <b>Phantom Spend</b>.</li>
+                        <li><b>Goal</b>: Push for high-intent conversion metrics (CPA &le; $0.30 and Save Rate &gt; 20%) to prime the algorithmic recommendation feeds.</li>
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
         with col3:
             st.markdown(
-                "<div style='border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; min-height: 200px;'>"
-                "<h4 style='color: #FBAD30;'>3. Week 4: Scaling</h4>"
-                "<h5 style='color: #fff;'>Budget: $250</h5>"
-                "<p style='font-size: 0.85rem; color: #9ca3af;'>If Week 3 Showcase metrics hit target benchmarks (CPA < $0.25, Save Rate > 20%), scale up the campaign. Otherwise, halt spend and run organic.</p>"
-                "</div>", unsafe_allow_html=True
+                """
+                <div style="border: 1px solid #E5E7EB; border-left: 5px solid #6366F1; border-radius: 12px; padding: 20px; background-color: #FFFFFF; box-shadow: 0 4px 15px rgba(0,0,0,0.03); min-height: 400px; display: flex; flex-direction: column;">
+                    <h4 style="color: #4F46E5; margin-top: 0; font-size: 1.15rem; font-weight: 700;">🚀 Step 3. Week 4: Scaling Decisions</h4>
+                    <h5 style="color: #1F2937; font-size: 0.95rem; font-weight: 600; margin-top: 5px; margin-bottom: 12px;">Budget Allocation: $250</h5>
+                    <ul style="font-size: 0.85rem; color: #4B5563; padding-left: 18px; line-height: 1.6; margin-bottom: 0;">
+                        <li><b>Check Showcase Telemetry</b>: Assess Week 3 Showcase performance. Compare metrics against targets (CPA &lt; $0.25, Save Rate &gt; 20%).</li>
+                        <li><b>Scale Path (Green Light)</b>: If targets are met, inject the remaining $250 to accelerate Spotify Home recommendation placement.</li>
+                        <li><b>Halt Path (Red Light)</b>: If CPA &gt; $0.35 or Save Rate &lt; 12%, halt active paid promotions immediately to protect capital. Let the track build organic momentum.</li>
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
     elif slide == "5. Interactive Simulator":
