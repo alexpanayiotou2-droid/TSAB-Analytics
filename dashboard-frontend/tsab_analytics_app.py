@@ -3349,17 +3349,17 @@ with tab_strategy:
         st.info("Please load campaign records in the sidebar to generate the reinvestment console.")
 
 with tab_playbook:
-    st.markdown("## 🎯 July 3rd Release: Agile Launch Playbook")
+    st.markdown("## 🎯 July 3rd Release: 'Marbles' Agile Launch Playbook")
     
     # Initialize slide session state if not set
     if 'playbook_slide' not in st.session_state:
-        st.session_state.playbook_slide = "1. Overview & Agile Plan"
+        st.session_state.playbook_slide = "1. 'Marbles' Genre Profile"
 
     # Slide-based navigation via Sleek horizontal button controls
     col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
     
-    if col_btn1.button("1. Overview", use_container_width=True, type="primary" if st.session_state.playbook_slide == "1. Overview & Agile Plan" else "secondary"):
-        st.session_state.playbook_slide = "1. Overview & Agile Plan"
+    if col_btn1.button("1. Genre Profile", use_container_width=True, type="primary" if st.session_state.playbook_slide == "1. 'Marbles' Genre Profile" else "secondary"):
+        st.session_state.playbook_slide = "1. 'Marbles' Genre Profile"
         st.rerun()
     if col_btn2.button("2. Cost-Audit", use_container_width=True, type="primary" if st.session_state.playbook_slide == "2. Cost-Efficiency Audit" else "secondary"):
         st.session_state.playbook_slide = "2. Cost-Efficiency Audit"
@@ -3378,26 +3378,32 @@ with tab_playbook:
     
     st.markdown("---")
     
-    if slide == "1. Overview & Agile Plan":
+    if slide == "1. 'Marbles' Genre Profile":
         col_l, col_r = st.columns([1.2, 1])
         with col_l:
             st.markdown(
-                "### July 3 Release: The Agile Plan of Attack\n"
-                "Historically, our summer campaigns have hit structural friction. For example, **Great Riddance** (July release) yielded only a **0.14x Spotify ROAS** and immediate post-campaign baseline decay.\n\n"
-                "However, drawing hard conclusions from a sample size of **N = 1** is a statistical risk. The slump could have been track-specific, or due to ad creative choice.\n\n"
-                "**Our Strategy: The Agile Performance-First Framework**. We do not restrict our budget based on the calendar month. Instead, we run a short 7-day test and let real-time listener conversion metrics dictate our scale."
+                "### 🧬 Sonic Analysis & The Agile Shift\n"
+                "Our upcoming single **'Marbles'** represents a major genre shift from our historical Indie Folk/Dream Pop style. "
+                "Instead of soft acoustic vibes, 'Marbles' is an energetic, mid-tempo groove machine. "
+                "\n\n**The Strategy:** Because this is a new sonic niche, we are running a **7-day Agile Test** (Week 3) "
+                "to find the true conversion rate of this new demographic before deploying scaling capital."
             )
-        with col_r:
             st.markdown(
                 "<div style='border: 1px solid rgba(255,255,255,0.08); border-left: 4.5px solid #FBAD30; border-radius: 8px; padding: 16px; background-color: rgba(255,255,255,0.02);'>"
-                "<h4 style='color: #FBAD30; margin-top:0;'>☀️ Summer Release Confounder</h4>"
-                "<p style='font-size: 0.9rem; margin-bottom: 0;'><b>N = 1 Sample Size:</b> Statistically low confidence for a hard summer ban. We run a 7-day agile pilot and let live metrics decide our budget.</p>"
+                "<h4 style='color: #FBAD30; margin-top:0; font-size: 1rem;'>🛸 Cyanite.ai Sonic Profiling</h4>"
+                "<p style='font-size: 0.85rem; margin-bottom: 4px;'><b>Mood & Character:</b> Energetic, Sexy, Uplifting, Cool</p>"
+                "<p style='font-size: 0.85rem; margin-bottom: 4px;'><b>Movement:</b> Groovy, Stomping</p>"
+                "<p style='font-size: 0.85rem; margin-bottom: 0;'><b>Style Era:</b> Late 1990s / Early 2000s Pop Rock</p>"
                 "</div>", unsafe_allow_html=True
             )
-            st.markdown("")
-            col_metric1, col_metric2 = st.columns(2)
-            col_metric1.metric("🌱 Spring CPA", "~$0.24", help="Optimal historical conversion range.")
-            col_metric2.metric("🍂 Autumn Tail", "+113%", help="High organic baseline lift (Astronaut).")
+        with col_r:
+            st.markdown("#### SubmitHub Genre Analyzer Breakdown")
+            st.progress(0.33, text="🎸 Blues (33%)")
+            st.progress(0.32, text="⚡ Blues Rock (32%)")
+            st.progress(0.12, text="🤠 Southern Rock / Red Dirt (12%)")
+            st.progress(0.11, text="🌀 Progressive Rock (11%)")
+            st.progress(0.08, text="🎷 Nu Jazz / Jazztronica (8%)")
+            st.caption("A combined 65% Blues/Blues Rock foundation with Southern and Jazztronica accents. This requires a dedicated pivot in our curator pitches.")
 
     elif slide == "2. Cost-Efficiency Audit":
         col_l, col_r = st.columns([1, 1.2])
@@ -3456,7 +3462,7 @@ with tab_playbook:
             )
 
     elif slide == "4. 4-Week Timeline":
-        st.markdown("### 📅 4-Week Release Campaign Timeline")
+        st.markdown("### 📅 'Marbles' 4-Week Release Campaign Timeline")
         st.markdown("Detailed channel checkpoints, budget targets, and strategic rules for the July 3rd launch.")
         
         col1, col2, col3 = st.columns(3)
@@ -3467,8 +3473,8 @@ with tab_playbook:
                     <h4 style="color: #059669; margin-top: 0; font-size: 1.15rem; font-weight: 700;">🌱 Step 1. Weeks 1-2: PR Seeding</h4>
                     <h5 style="color: #1F2937; font-size: 0.95rem; font-weight: 600; margin-top: 5px; margin-bottom: 12px;">Budget Allocation: $100</h5>
                     <ul style="font-size: 0.85rem; color: #4B5563; padding-left: 18px; line-height: 1.6; margin-bottom: 0;">
-                        <li><b>SubmitHub pitches ($50)</b>: You <b>MUST use Premium Credits</b> (not standard). This guarantees response times within 48 hours, yielding quick playlist additions and immediate curator reviews.</li>
-                        <li><b>Musosoup listing ($50)</b>: Launch a 3-week campaign. Accept only verified premium placement offers with high follower reach to maximize efficiency (historical average: $0.62 per add).</li>
+                        <li><b>SubmitHub pitches ($50)</b>: You <b>MUST use Premium Credits</b> (not standard) targeting Blues, Southern Rock, and Nu-Jazz playlisters (exclude folk/acoustic curators). This guarantees response times within 48 hours.</li>
+                        <li><b>Musosoup listing ($50)</b>: Launch a 3-week campaign targeting Funk Pop, Alternative/Blues Rock, and Jam Band tags. Accept only verified premium placement offers with high reach.</li>
                         <li><b>Budget Holds</b>: Keep Playlist Push and Indie Music Academy budgets fully locked. Do not launch raw playlist campaigns before establishing organic listener signals.</li>
                     </ul>
                 </div>
