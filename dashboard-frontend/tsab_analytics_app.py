@@ -442,6 +442,43 @@ def save_ima_to_db(url, key, campaigns_df, placements_df):
                 logger.error(f"Failed to insert placements: {e}")
                 raise e
 
+def save_instagram_to_db(url, key, campaigns_df):
+    headers = {
+        'apikey': key,
+        'Authorization': f'Bearer {key}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+    }
+    ssl_context = ssl.create_default_context()
+    
+    # 1. Clear existing instagram_campaigns records
+    endpoint_delete = f"{url.rstrip('/')}/rest/v1/instagram_campaigns?id=not.is.null"
+    req = urllib.request.Request(endpoint_delete, headers=headers, method='DELETE')
+    try:
+        with urllib.request.urlopen(req, context=ssl_context) as resp:
+            pass
+    except Exception:
+        pass
+        
+    # 2. Upload campaigns
+    if not campaigns_df.empty:
+        camp_records = campaigns_df.to_dict(orient='records')
+        for r in camp_records:
+            for k, v in r.items():
+                if isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
+                    r[k] = v.isoformat()
+                elif pd.isna(v):
+                    r[k] = None
+        endpoint = f"{url.rstrip('/')}/rest/v1/instagram_campaigns"
+        payload = json.dumps(camp_records).encode('utf-8')
+        req = urllib.request.Request(endpoint, data=payload, headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, context=ssl_context) as resp:
+                pass
+        except Exception as e:
+            logger.error(f"Failed to insert Instagram campaigns: {e}")
+            raise e
+
 def save_musosoup_to_db(url, key, campaigns_df, placements_df):
     import urllib.parse
     headers = {
@@ -1237,6 +1274,55 @@ with st.sidebar:
         else:
             st.info("💡 Set Supabase credentials to save Indie Music Academy uploads permanently.")
 
+    instagram_uploads = st.file_uploader("9. Add Instagram Campaigns", type="csv", accept_multiple_files=True)
+    st.caption("📂 *Expects: Instagram Post Campaign CSV reports (e.g. 'Insta Campaigns-Jun-1-2023-Jul-1-2026.csv')*")
+
+    # Ingest to DB Button for Instagram
+    if instagram_uploads:
+        if SUPABASE_URL and SUPABASE_KEY:
+            if st.button("💾 Save Instagram Uploads to DB", key="save_ig_db_btn"):
+                with st.spinner("Processing and uploading Instagram campaigns..."):
+                    try:
+                        dfs = []
+                        for file in instagram_uploads:
+                            df = pd.read_csv(file)
+                            campaigns = []
+                            for idx, row in df.iterrows():
+                                rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
+                                rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+                                ends = pd.to_datetime(row.get('Ends'), errors='coerce')
+                                c_name = row.get('Campaign name')
+                                if pd.isna(c_name) or not str(c_name).strip():
+                                    continue
+                                campaigns.append({
+                                    'reporting_starts': rep_starts.date().isoformat() if pd.notna(rep_starts) else None,
+                                    'reporting_ends': rep_ends.date().isoformat() if pd.notna(rep_ends) else None,
+                                    'campaign_name': str(c_name).strip(),
+                                    'campaign_delivery': str(row.get('Campaign delivery', '')).strip(),
+                                    'results': int(pd.to_numeric(row.get('Results'), errors='coerce').fillna(0)),
+                                    'result_indicator': str(row.get('Result indicator', '')).strip(),
+                                    'reach': int(pd.to_numeric(row.get('Reach'), errors='coerce').fillna(0)),
+                                    'frequency': float(pd.to_numeric(row.get('Frequency'), errors='coerce').fillna(0.0)),
+                                    'amount_spent_usd': float(pd.to_numeric(row.get('Amount spent (USD)'), errors='coerce').fillna(0.0)),
+                                    'ends_date': ends.date().isoformat() if pd.notna(ends) else None,
+                                    'impressions': int(pd.to_numeric(row.get('Impressions'), errors='coerce').fillna(0)),
+                                    'link_clicks': int(pd.to_numeric(row.get('Link clicks'), errors='coerce').fillna(0)),
+                                    'cpc_usd': float(pd.to_numeric(row.get('CPC (cost per link click) (USD)'), errors='coerce').fillna(0.0)),
+                                    'ctr': float(pd.to_numeric(row.get('CTR (link click-through rate)'), errors='coerce').fillna(0.0)),
+                                    'clicks_all': int(pd.to_numeric(row.get('Clicks (all)'), errors='coerce').fillna(0))
+                                })
+                            if campaigns:
+                                dfs.append(pd.DataFrame(campaigns))
+                        if dfs:
+                            save_instagram_to_db(SUPABASE_URL, SUPABASE_KEY, pd.concat(dfs, ignore_index=True))
+                            st.toast("✅ Successfully saved Instagram campaigns to Supabase!")
+                            st.cache_data.clear()
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to save data: {e}")
+        else:
+            st.info("💡 Set Supabase credentials to save Instagram uploads permanently.")
+
 
 
 
@@ -1254,6 +1340,7 @@ ms_campaigns_base_df = load_base_data("musosoup_campaigns", "Musosoup/musosoup_c
 ms_placements_base_df = load_base_data("musosoup_placements", "Musosoup/musosoup_placements.csv", {})
 ima_campaigns_base_df = load_base_data("ima_campaigns", "Indie Music Academy/ima_campaigns.csv", {})
 ima_placements_base_df = load_base_data("ima_placements", "Indie Music Academy/ima_placements.csv", {})
+instagram_campaigns_base_df = load_base_data("instagram_campaigns", "Instagram/instagram_campaigns.csv", {})
 
 
 
@@ -1366,7 +1453,8 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
                  submithub_base_df, submithub_purchases_base_df, submithub_files,
                  pp_campaigns_base_df, pp_placements_base_df, pp_files,
                  ms_campaigns_base_df, ms_placements_base_df, ms_files,
-                 ima_campaigns_base_df, ima_placements_base_df, ima_files):
+                 ima_campaigns_base_df, ima_placements_base_df, ima_files,
+                 instagram_campaigns_base_df, instagram_files):
     
     def stitch_data(base_df, uploaded_files):
         dfs = []
@@ -2168,6 +2256,66 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         dk_df['Earnings (USD)'] = pd.to_numeric(dk_df['Earnings (USD)'], errors='coerce').fillna(0)
         dk_df['Quantity'] = pd.to_numeric(dk_df['Quantity'], errors='coerce').fillna(0)
 
+    # --- Instagram Campaigns Processing ---
+    instagram_campaigns_dfs = []
+    if not instagram_campaigns_base_df.empty:
+        instagram_campaigns_dfs.append(instagram_campaigns_base_df)
+    if instagram_files:
+        for file in instagram_files:
+            try:
+                df = pd.read_csv(file)
+                campaigns = []
+                for idx, row in df.iterrows():
+                    rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
+                    rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+                    ends = pd.to_datetime(row.get('Ends'), errors='coerce')
+                    c_name = row.get('Campaign name')
+                    if pd.isna(c_name) or not str(c_name).strip():
+                        continue
+                    campaigns.append({
+                        'reporting_starts': rep_starts.date().isoformat() if pd.notna(rep_starts) else None,
+                        'reporting_ends': rep_ends.date().isoformat() if pd.notna(rep_ends) else None,
+                        'campaign_name': str(c_name).strip(),
+                        'campaign_delivery': str(row.get('Campaign delivery', '')).strip(),
+                        'results': int(pd.to_numeric(row.get('Results'), errors='coerce').fillna(0)),
+                        'result_indicator': str(row.get('Result indicator', '')).strip(),
+                        'reach': int(pd.to_numeric(row.get('Reach'), errors='coerce').fillna(0)),
+                        'frequency': float(pd.to_numeric(row.get('Frequency'), errors='coerce').fillna(0.0)),
+                        'amount_spent_usd': float(pd.to_numeric(row.get('Amount spent (USD)'), errors='coerce').fillna(0.0)),
+                        'ends_date': ends.date().isoformat() if pd.notna(ends) else None,
+                        'impressions': int(pd.to_numeric(row.get('Impressions'), errors='coerce').fillna(0)),
+                        'link_clicks': int(pd.to_numeric(row.get('Link clicks'), errors='coerce').fillna(0)),
+                        'cpc_usd': float(pd.to_numeric(row.get('CPC (cost per link click) (USD)'), errors='coerce').fillna(0.0)),
+                        'ctr': float(pd.to_numeric(row.get('CTR (link click-through rate)'), errors='coerce').fillna(0.0)),
+                        'clicks_all': int(pd.to_numeric(row.get('Clicks (all)'), errors='coerce').fillna(0))
+                    })
+                if campaigns:
+                    instagram_campaigns_dfs.append(pd.DataFrame(campaigns))
+            except Exception:
+                pass
+                
+    if not instagram_files and instagram_campaigns_base_df.empty:
+        ig_file = "data-backend/Instagram/instagram_campaigns.csv"
+        if os.path.exists(ig_file):
+            try:
+                instagram_campaigns_dfs.append(pd.read_csv(ig_file))
+            except Exception:
+                pass
+                
+    if instagram_campaigns_dfs:
+        instagram_df = pd.concat(instagram_campaigns_dfs, ignore_index=True).drop_duplicates(subset=['campaign_name', 'reporting_starts'])
+    else:
+        instagram_df = pd.DataFrame(columns=[
+            'reporting_starts', 'reporting_ends', 'campaign_name', 'campaign_delivery', 'results',
+            'result_indicator', 'reach', 'frequency', 'amount_spent_usd', 'ends_date',
+            'impressions', 'link_clicks', 'cpc_usd', 'ctr', 'clicks_all'
+        ])
+        
+    if not instagram_df.empty:
+        instagram_df['amount_spent_usd'] = pd.to_numeric(instagram_df['amount_spent_usd'], errors='coerce').fillna(0.0)
+        instagram_df['reporting_starts'] = pd.to_datetime(instagram_df['reporting_starts'], errors='coerce')
+        instagram_df['ends_date'] = pd.to_datetime(instagram_df['ends_date'], errors='coerce')
+
     # --- Indie Music Academy Processing ---
     ima_campaigns_dfs = []
     ima_placements_dfs = []
@@ -2467,15 +2615,16 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
     if not ima_placements_df.empty:
         ima_placements_df['followers'] = pd.to_numeric(ima_placements_df['followers'], errors='coerce').fillna(0)
 
-    return dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df, ms_campaigns_df, ms_placements_df, ima_campaigns_df, ima_placements_df
+    return dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df, ms_campaigns_df, ms_placements_df, ima_campaigns_df, ima_placements_df, instagram_df
 
 with st.spinner("Stitching and processing datasets..."):
-    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df, ms_campaigns_df, ms_placements_df, ima_campaigns_df, ima_placements_df = process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_campaigns_df, pp_placements_df, ms_campaigns_df, ms_placements_df, ima_campaigns_df, ima_placements_df, instagram_df = process_data(
         dk_base_df, dk_uploads, spot_base_df, spot_uploads, s4a_base_df, s4a_uploads, meta_uploads, 
         submithub_base_df, submithub_purchases_base_df, submithub_uploads,
         pp_campaigns_base_df, pp_placements_base_df, playlist_push_uploads,
         ms_campaigns_base_df, ms_placements_base_df, musosoup_uploads,
-        ima_campaigns_base_df, ima_placements_base_df, ima_uploads
+        ima_campaigns_base_df, ima_placements_base_df, ima_uploads,
+        instagram_campaigns_base_df, instagram_uploads
     )
 
 
@@ -2684,6 +2833,7 @@ if not ima_campaigns_df.empty:
 pp_anchor = pd.to_datetime(pp_campaigns_df['campaign_date'], errors='coerce').max() if not pp_campaigns_df.empty else pd.Timestamp.now()
 ms_anchor = pd.to_datetime(ms_campaigns_df['campaign_date'], errors='coerce').max() if not ms_campaigns_df.empty else pd.Timestamp.now()
 ima_anchor = pd.to_datetime(ima_campaigns_df['campaign_date'], errors='coerce').max() if not ima_campaigns_df.empty else pd.Timestamp.now()
+ig_anchor = instagram_df['reporting_starts'].max() if not instagram_df.empty else pd.Timestamp.now()
 
 if days_lookback:
     dk_current = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback)) & (dk_df['Reporting Date'] <= dk_anchor)] if not dk_df.empty else dk_df
@@ -2693,6 +2843,7 @@ if days_lookback:
     pp_current = pp_campaigns_df[(pp_campaigns_df['campaign_date'] > pp_anchor - pd.Timedelta(days=days_lookback)) & (pp_campaigns_df['campaign_date'] <= pp_anchor)] if not pp_campaigns_df.empty else pp_campaigns_df
     ms_current = ms_campaigns_df[(ms_campaigns_df['campaign_date'] > ms_anchor - pd.Timedelta(days=days_lookback)) & (ms_campaigns_df['campaign_date'] <= ms_anchor)] if not ms_campaigns_df.empty else ms_campaigns_df
     ima_current = ima_campaigns_df[(ima_campaigns_df['campaign_date'] > ima_anchor - pd.Timedelta(days=days_lookback)) & (ima_campaigns_df['campaign_date'] <= ima_anchor)] if not ima_campaigns_df.empty else ima_campaigns_df
+    instagram_current = instagram_df[(instagram_df['reporting_starts'] > ig_anchor - pd.Timedelta(days=days_lookback)) & (instagram_df['reporting_starts'] <= ig_anchor)] if not instagram_df.empty else instagram_df
     
     dk_prior = dk_df[(dk_df['Reporting Date'] > dk_anchor - pd.Timedelta(days=days_lookback*2)) & (dk_df['Reporting Date'] <= dk_anchor - pd.Timedelta(days=days_lookback))] if not dk_df.empty else dk_df
     spot_prior = spot_df[(spot_df['End Date'] > spot_anchor - pd.Timedelta(days=days_lookback*2)) & (spot_df['End Date'] <= spot_anchor - pd.Timedelta(days=days_lookback))] if not spot_df.empty else spot_df
@@ -2701,6 +2852,7 @@ if days_lookback:
     pp_prior = pp_campaigns_df[(pp_campaigns_df['campaign_date'] > pp_anchor - pd.Timedelta(days=days_lookback*2)) & (pp_campaigns_df['campaign_date'] <= pp_anchor - pd.Timedelta(days=days_lookback))] if not pp_campaigns_df.empty else pp_campaigns_df
     ms_prior = ms_campaigns_df[(ms_campaigns_df['campaign_date'] > ms_anchor - pd.Timedelta(days=days_lookback*2)) & (ms_campaigns_df['campaign_date'] <= ms_anchor - pd.Timedelta(days=days_lookback))] if not ms_campaigns_df.empty else ms_campaigns_df
     ima_prior = ima_campaigns_df[(ima_campaigns_df['campaign_date'] > ima_anchor - pd.Timedelta(days=days_lookback*2)) & (ima_campaigns_df['campaign_date'] <= ima_anchor - pd.Timedelta(days=days_lookback))] if not ima_campaigns_df.empty else ima_campaigns_df
+    instagram_prior = instagram_df[(instagram_df['reporting_starts'] > ig_anchor - pd.Timedelta(days=days_lookback*2)) & (instagram_df['reporting_starts'] <= ig_anchor - pd.Timedelta(days=days_lookback))] if not instagram_df.empty else instagram_df
 else:
     dk_current = dk_df
     spot_current = spot_df
@@ -2709,6 +2861,7 @@ else:
     pp_current = pp_campaigns_df
     ms_current = ms_campaigns_df
     ima_current = ima_campaigns_df
+    instagram_current = instagram_df
     
     dk_prior = pd.DataFrame(columns=dk_df.columns if not dk_df.empty else [])
     spot_prior = pd.DataFrame(columns=spot_df.columns if not spot_df.empty else [])
@@ -2717,15 +2870,17 @@ else:
     pp_prior = pd.DataFrame(columns=pp_campaigns_df.columns if not pp_campaigns_df.empty else [])
     ms_prior = pd.DataFrame(columns=ms_campaigns_df.columns if not ms_campaigns_df.empty else [])
     ima_prior = pd.DataFrame(columns=ima_campaigns_df.columns if not ima_campaigns_df.empty else [])
+    instagram_prior = pd.DataFrame(columns=instagram_df.columns if not instagram_df.empty else [])
 
-# Compute Blended Spend: Spotify + Meta + SubmitHub + Playlist Push + Musosoup + Indie Music Academy
+# Compute Blended Spend: Spotify + Meta + SubmitHub + Playlist Push + Musosoup + Indie Music Academy + Instagram Campaigns
 spend_current = (
     (spot_current['Spend'].sum() if not spot_current.empty else 0) + 
     (meta_current['Amount Spent (USD)'].sum() if not meta_current.empty else 0) + 
     (submithub_current['cost_usd'].sum() if not submithub_current.empty else 0) +
     (pp_current['budget_usd'].sum() if not pp_current.empty else 0) +
     (ms_current['budget_usd'].sum() if not ms_current.empty else 0) +
-    (ima_current['budget_usd'].sum() if not ima_current.empty else 0)
+    (ima_current['budget_usd'].sum() if not ima_current.empty else 0) +
+    (instagram_current['amount_spent_usd'].sum() if not instagram_current.empty else 0)
 )
 earn_current = dk_current['Earnings (USD)'].sum() if not dk_current.empty else 0
 # Compute Blended Conversions: Spotify converted listeners + SubmitHub approvals + Playlist Push adds + Musosoup adds + IMA placements
@@ -2748,7 +2903,8 @@ spend_prior = (
     (submithub_prior['cost_usd'].sum() if not submithub_prior.empty and 'cost_usd' in submithub_prior.columns else 0) +
     (pp_prior['budget_usd'].sum() if not pp_prior.empty and 'budget_usd' in pp_prior.columns else 0) +
     (ms_prior['budget_usd'].sum() if not ms_prior.empty and 'budget_usd' in ms_prior.columns else 0) +
-    (ima_prior['budget_usd'].sum() if not ima_prior.empty and 'budget_usd' in ima_prior.columns else 0)
+    (ima_prior['budget_usd'].sum() if not ima_prior.empty and 'budget_usd' in ima_prior.columns else 0) +
+    (instagram_prior['amount_spent_usd'].sum() if not instagram_prior.empty and 'amount_spent_usd' in instagram_prior.columns else 0)
 )
 earn_prior = dk_prior['Earnings (USD)'].sum() if not dk_prior.empty and 'Earnings (USD)' in dk_prior.columns else 0
 conv_prior = (
@@ -2808,6 +2964,80 @@ tab_trends, tab_pr, tab_strategy, tab_playbook = st.tabs([
 ])
 
 with tab_trends:
+    # Daily streams and Instagram timelines chart
+    st.markdown("#### 📈 Daily Streams & Instagram Ad Campaign Timelines")
+    st.markdown("This timeline maps your Spotify daily streams against the run windows of Instagram ad campaigns to help you identify correlated stream spikes.")
+    
+    if s4a_df.empty:
+        st.info("💡 Awaiting Spotify for Artists daily timeline track data to visualize stream trends.")
+    else:
+        s4a_daily = s4a_df.groupby('date')['streams'].sum().reset_index()
+        s4a_daily['date'] = pd.to_datetime(s4a_daily['date'])
+        
+        if not s4a_daily.empty:
+            # S4A Streams Line
+            line = alt.Chart(s4a_daily).mark_line(color='#1DB954', strokeWidth=2).encode(
+                x=alt.X('date:T', title='Date'),
+                y=alt.Y('streams:Q', title='Daily Spotify Streams'),
+                tooltip=[
+                    alt.Tooltip('date:T', title='Date', format='%Y-%m-%d'),
+                    alt.Tooltip('streams:Q', title='Daily Streams', format=',')
+                ]
+            )
+            
+            chart = line
+            
+            if not instagram_df.empty:
+                rects = alt.Chart(instagram_df).mark_rect(
+                    opacity=0.25,
+                    color='#E1306C' # Instagram brand pink-red
+                ).encode(
+                    x='reporting_starts:T',
+                    x2='ends_date:T',
+                    tooltip=[
+                        alt.Tooltip('campaign_name:N', title='Campaign'),
+                        alt.Tooltip('reporting_starts:T', title='Starts', format='%Y-%m-%d'),
+                        alt.Tooltip('ends_date:T', title='Ends', format='%Y-%m-%d'),
+                        alt.Tooltip('amount_spent_usd:Q', title='Spend (USD)', format='$.2f'),
+                        alt.Tooltip('reach:Q', title='Reach', format=','),
+                        alt.Tooltip('link_clicks:Q', title='Link Clicks', format=',')
+                    ]
+                )
+                chart = alt.layer(rects, line)
+                
+            st.altair_chart(chart.properties(height=350).interactive(), use_container_width=True)
+            
+            if not instagram_df.empty:
+                with st.expander("📂 View Instagram Campaigns Details Log"):
+                    display_ig = instagram_df[[
+                        'campaign_name', 'reporting_starts', 'ends_date', 'amount_spent_usd', 
+                        'reach', 'impressions', 'link_clicks', 'ctr'
+                    ]].rename(columns={
+                        'campaign_name': 'Campaign Name',
+                        'reporting_starts': 'Start Date',
+                        'ends_date': 'End Date',
+                        'amount_spent_usd': 'Spend (USD)',
+                        'reach': 'Reach',
+                        'impressions': 'Impressions',
+                        'link_clicks': 'Link Clicks',
+                        'ctr': 'CTR (%)'
+                    })
+                    st.dataframe(
+                        display_ig.style.format({
+                            'Spend (USD)': '${:,.2f}',
+                            'Reach': '{:,.0f}',
+                            'Impressions': '{:,.0f}',
+                            'Link Clicks': '{:,.0f}',
+                            'CTR (%)': '{:.2f}%'
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+        else:
+            st.info("No daily stream timeline records found.")
+            
+    st.write("---")
+
     col_v1, col_v2 = st.columns([1, 1])
     with col_v1:
         st.markdown("##### Geographic Stream Distribution (Top 5 Countries)")

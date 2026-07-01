@@ -126,7 +126,7 @@ def test_stitch_data_processing():
     spot_base = pd.DataFrame()
     s4a_base = pd.DataFrame()
     
-    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df = tsab_analytics_app.process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df, instagram_df = tsab_analytics_app.process_data(
         dk_base_df=dk_base,
         dk_files=None,
         spot_base_df=spot_base,
@@ -145,7 +145,9 @@ def test_stitch_data_processing():
         ms_files=None,
         ima_campaigns_base_df=pd.DataFrame(),
         ima_placements_base_df=pd.DataFrame(),
-        ima_files=None
+        ima_files=None,
+        instagram_campaigns_base_df=pd.DataFrame(),
+        instagram_files=None
     )
     
     assert not dk_df.empty
@@ -176,7 +178,7 @@ def test_musosoup_processing():
         'placement_type': 'Playlist'
     }])
     
-    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df = tsab_analytics_app.process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df, instagram_df = tsab_analytics_app.process_data(
         dk_base_df=pd.DataFrame(),
         dk_files=None,
         spot_base_df=pd.DataFrame(),
@@ -195,7 +197,9 @@ def test_musosoup_processing():
         ms_files=None,
         ima_campaigns_base_df=pd.DataFrame(),
         ima_placements_base_df=pd.DataFrame(),
-        ima_files=None
+        ima_files=None,
+        instagram_campaigns_base_df=pd.DataFrame(),
+        instagram_files=None
     )
     
     assert not ms_camp_df.empty
@@ -222,7 +226,7 @@ def test_ima_processing():
         'published_date': '2026-06-04'
     }])
     
-    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df = tsab_analytics_app.process_data(
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df, instagram_df = tsab_analytics_app.process_data(
         dk_base_df=pd.DataFrame(),
         dk_files=None,
         spot_base_df=pd.DataFrame(),
@@ -241,12 +245,62 @@ def test_ima_processing():
         ms_files=None,
         ima_campaigns_base_df=ima_campaign_base,
         ima_placements_base_df=ima_placement_base,
-        ima_files=None
+        ima_files=None,
+        instagram_campaigns_base_df=pd.DataFrame(),
+        instagram_files=None
     )
     
     assert not ima_camp_df.empty
     assert ima_camp_df.iloc[0]['song'] == 'Astronaut'
     assert not ima_place_df.empty
     assert ima_place_df.iloc[0]['curator'] == 'Cookfy'
+
+
+def test_instagram_processing():
+    ig_campaign_base = pd.DataFrame([{
+        'reporting_starts': '2026-06-01',
+        'reporting_ends': '2026-07-01',
+        'campaign_name': 'Instagram post: Sax solos in 5/4 hit different.',
+        'campaign_delivery': 'completed',
+        'results': 149,
+        'result_indicator': 'actions:visit_instagram_profile',
+        'reach': 8353,
+        'frequency': 1.216449,
+        'amount_spent_usd': 69.82,
+        'ends_date': '2026-05-06',
+        'impressions': 10161,
+        'link_clicks': 155,
+        'cpc_usd': 0.450452,
+        'ctr': 1.52544,
+        'clicks_all': 237
+    }])
+    
+    dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df, instagram_df = tsab_analytics_app.process_data(
+        dk_base_df=pd.DataFrame(),
+        dk_files=None,
+        spot_base_df=pd.DataFrame(),
+        spot_files=None,
+        s4a_base_df=pd.DataFrame(),
+        s4a_files=None,
+        meta_files=None,
+        submithub_base_df=pd.DataFrame(),
+        submithub_purchases_base_df=pd.DataFrame(),
+        submithub_files=None,
+        pp_campaigns_base_df=pd.DataFrame(),
+        pp_placements_base_df=pd.DataFrame(),
+        pp_files=None,
+        ms_campaigns_base_df=pd.DataFrame(),
+        ms_placements_base_df=pd.DataFrame(),
+        ms_files=None,
+        ima_campaigns_base_df=pd.DataFrame(),
+        ima_placements_base_df=pd.DataFrame(),
+        ima_files=None,
+        instagram_campaigns_base_df=ig_campaign_base,
+        instagram_files=None
+    )
+    
+    assert not instagram_df.empty
+    assert instagram_df.iloc[0]['campaign_name'] == 'Instagram post: Sax solos in 5/4 hit different.'
+    assert instagram_df.iloc[0]['amount_spent_usd'] == 69.82
 
 

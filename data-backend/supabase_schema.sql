@@ -496,3 +496,35 @@ TO anon, authenticated USING (true);
 CREATE POLICY "Allow read access to anon users" 
 ON ima_placements FOR SELECT 
 TO anon, authenticated USING (true);
+
+-- Table: instagram_campaigns
+CREATE TABLE IF NOT EXISTS instagram_campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reporting_starts DATE,
+    reporting_ends DATE,
+    campaign_name VARCHAR(255),
+    campaign_delivery VARCHAR(50),
+    results INTEGER NOT NULL DEFAULT 0,
+    result_indicator VARCHAR(255),
+    reach INTEGER NOT NULL DEFAULT 0,
+    frequency NUMERIC(10, 6) NOT NULL DEFAULT 0.00,
+    amount_spent_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    ends_date DATE,
+    impressions INTEGER NOT NULL DEFAULT 0,
+    link_clicks INTEGER NOT NULL DEFAULT 0,
+    cpc_usd NUMERIC(10, 6) NOT NULL DEFAULT 0.00,
+    ctr NUMERIC(10, 6) NOT NULL DEFAULT 0.00,
+    clicks_all INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE instagram_campaigns ENABLE ROW LEVEL SECURITY;
+
+-- Policies
+DROP POLICY IF EXISTS "Allow read access to anon users" ON instagram_campaigns;
+
+CREATE POLICY "Allow read access to anon users" 
+ON instagram_campaigns FOR SELECT 
+TO anon, authenticated USING (true);
+
