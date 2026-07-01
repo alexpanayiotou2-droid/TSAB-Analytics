@@ -219,6 +219,26 @@ def load_base_data(table_name, local_file_name, column_map):
             st.sidebar.warning(f"⚠️ Supabase load failed for '{table_name}'. Falling back to local data. Error: {e}")
             
     # Fallback to local CSV
+    if table_name == "s4a_daily_streams":
+        s4a_dirs = ["Spotify For Artists", "../Spotify For Artists", "data-backend/Spotify For Artists", "../data-backend/Spotify For Artists"]
+        for s4a_dir in s4a_dirs:
+            if os.path.exists(s4a_dir):
+                dfs = []
+                for f in os.listdir(s4a_dir):
+                    if f.endswith('-timeline.csv') or f.endswith('_timeline.csv') or f.endswith(' timeline.csv'):
+                        try:
+                            temp_df = pd.read_csv(os.path.join(s4a_dir, f))
+                            temp_df.columns = temp_df.columns.str.lower()
+                            if 'date' in temp_df.columns and 'streams' in temp_df.columns:
+                                raw_name = os.path.splitext(f)[0]
+                                track_name = raw_name.replace('-timeline', '').replace('_timeline', '').replace(' timeline', '').strip()
+                                temp_df['track_name'] = track_name
+                                dfs.append(temp_df)
+                        except Exception:
+                            pass
+                if dfs:
+                    return pd.concat(dfs, ignore_index=True)
+
     if local_file_name:
         for path in (local_file_name, f"../{local_file_name}", f"data-backend/{local_file_name}", f"../data-backend/{local_file_name}"):
             if os.path.exists(path):
