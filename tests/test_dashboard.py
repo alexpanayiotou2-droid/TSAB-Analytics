@@ -304,3 +304,62 @@ def test_instagram_processing():
     assert instagram_df.iloc[0]['amount_spent_usd'] == 69.82
 
 
+def test_musosoup_file_parsing():
+    import io
+    # Create a mock CSV file
+    csv_content = (
+        "submit_id,artist,title,curator,publication,offer_id,completion_date,accept_type,contribution,completion_url\n"
+        "123,The Socially Acceptable Band,Marbles,Curator A,Pub A,987,2026-07-06,Free,0.00,https://open.spotify.com/playlist/2PdSPlgh1Ra7QTNDRNNO4N\n"
+    )
+    mock_csv = io.BytesIO(csv_content.encode('utf-8'))
+    mock_csv.name = "Musosoup-Campaign-Report-Marbles (7.12).csv"
+    
+    # Create a mock PDF file (empty bytes is fine if we patch PdfReader)
+    mock_pdf = io.BytesIO(b"")
+    mock_pdf.name = "Musosoup-payment-Marbles.pdf"
+    
+    # Mock pypdf.PdfReader
+    mock_reader = MagicMock()
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = (
+        "Date: 06/07/2026\n"
+        "Campaign activation for Socially Acceptable - Marbles\n"
+        "TOTAL: £42.00\n"
+    )
+    mock_reader.pages = [mock_page]
+    
+    with patch('pypdf.PdfReader', return_value=mock_reader):
+        dk_df, spot_df, s4a_df, meta_df, submithub_df, pp_camp_df, pp_place_df, ms_camp_df, ms_place_df, ima_camp_df, ima_place_df, instagram_df = tsab_analytics_app.process_data(
+            dk_base_df=pd.DataFrame(),
+            dk_files=None,
+            spot_base_df=pd.DataFrame(),
+            spot_files=None,
+            s4a_base_df=pd.DataFrame(),
+            s4a_files=None,
+            meta_files=None,
+            submithub_base_df=pd.DataFrame(),
+            submithub_purchases_base_df=pd.DataFrame(),
+            submithub_files=None,
+            pp_campaigns_base_df=pd.DataFrame(),
+            pp_placements_base_df=pd.DataFrame(),
+            pp_files=None,
+            ms_campaigns_base_df=pd.DataFrame(),
+            ms_placements_base_df=pd.DataFrame(),
+            ms_files=[mock_csv, mock_pdf],
+            ima_campaigns_base_df=pd.DataFrame(),
+            ima_placements_base_df=pd.DataFrame(),
+            ima_files=None,
+            instagram_campaigns_base_df=pd.DataFrame(),
+            instagram_files=None
+        )
+        
+    assert not ms_camp_df.empty
+    # The song name should be matched and processed, and budget resolved using flexible match
+    assert ms_camp_df.iloc[0]['song'] == 'Marbles'
+    assert ms_camp_df.iloc[0]['playlist_adds'] == 1
+    assert ms_camp_df.iloc[0]['budget_usd'] == 54.6  # 42.0 * 1.30 = 54.6
+    assert not ms_place_df.empty
+    assert ms_place_df.iloc[0]['curator'] == 'Curator A'
+
+
+

@@ -6,6 +6,7 @@ import json
 import urllib.request
 import ssl
 import re
+import pypdf
 
 # --- 1. SETUP & CONFIG & BRAND PATHS ---
 import os
@@ -48,6 +49,35 @@ def load_env():
             break
 
 load_env()
+
+def get_placement_type(url):
+    if pd.isna(url) or not isinstance(url, str):
+        return 'Other'
+    u = url.lower()
+    if 'spotify.com/playlist' in u:
+        return 'Playlist'
+    elif 'instagram.com' in u or 'facebook.com' in u or 'tiktok.com' in u or 'twitter.com' in u or 'x.com' in u:
+        return 'Social'
+    elif 'youtube.com' in u or 'youtu.be' in u:
+        return 'Video'
+    return 'Blog/Press'
+
+GBP_TO_USD = 1.30
+
+CAMPAIGN_DEFAULTS = {
+    'astronaut': {
+        'budget_gbp': 36.00,
+        'campaign_date': '2024-09-21'
+    },
+    'great riddance': {
+        'budget_gbp': 36.00,
+        'campaign_date': '2024-07-28'
+    },
+    'sh2ba': {
+        'budget_gbp': 36.00,
+        'campaign_date': '2026-03-06'
+    }
+}
 
 # Inject custom CSS for premium Light Mode branding
 st.markdown(
@@ -783,7 +813,9 @@ with st.sidebar:
                         submithub_dataframes = []
                         for file in text_files:
                             content = file.getvalue().decode('utf-8', errors='ignore')
-                            song_name = file.name.replace(' response page text.txt', '').replace(' Response page text.txt', '').replace(' response page text', '').replace('.txt', '').strip()
+                            clean_name = re.sub(r'\s*response\s*page\s*text.*', '', file.name, flags=re.IGNORECASE)
+                            clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
+                            song_name = clean_name.replace('.txt', '').strip()
                             parsed_curators = parse_raw_text_content(content, song_name)
                             merged = process_single_song_submissions_btn(song_name, parsed_curators, master_csv_df, purchases)
                             df = pd.DataFrame(merged)
@@ -1046,7 +1078,7 @@ with st.sidebar:
                                     if match:
                                         song_name = match.group(1).strip()
                                 elif line.startswith('TOTAL'):
-                                    match = re.search(r'TOTAL\s+[^\d]*([\d\.]+)', line, re.IGNORECASE)
+                                    match = re.search(r'TOTAL\s*[^\d]*([\d\.]+)', line, re.IGNORECASE)
                                     if match:
                                         amount = float(match.group(1))
                             if not song_name:
@@ -1065,7 +1097,9 @@ with st.sidebar:
                         camps = []
                         placements = []
                         for file in report_csvs:
-                            song_name = file.name.replace("Musosoup-Campaign-Report-", "").replace(".csv", "").strip()
+                            clean_name = file.name.replace("Musosoup-Campaign-Report-", "")
+                            clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
+                            song_name = clean_name.replace(".csv", "").strip()
                             df = pd.read_csv(file)
                             df.columns = df.columns.str.strip().str.lower()
                             
@@ -1076,12 +1110,24 @@ with st.sidebar:
                             budget_gbp = 36.00
                             campaign_date = None
                             song_key = song_name.lower()
-                            if song_key in uploaded_payments:
-                                budget_gbp = uploaded_payments[song_key]['amount'] or budget_gbp
-                                campaign_date = uploaded_payments[song_key]['date']
-                            elif song_key in CAMPAIGN_DEFAULTS:
-                                budget_gbp = CAMPAIGN_DEFAULTS[song_key]['budget_gbp']
-                                campaign_date = CAMPAIGN_DEFAULTS[song_key]['campaign_date']
+                            matched_payment = None
+                            for k, pay in uploaded_payments.items():
+                                if k in song_key or song_key in k:
+                                    matched_payment = pay
+                                    break
+                            
+                            matched_default = None
+                            for k in CAMPAIGN_DEFAULTS:
+                                if k in song_key or song_key in k:
+                                    matched_default = k
+                                    break
+
+                            if matched_payment:
+                                budget_gbp = matched_payment['amount'] or budget_gbp
+                                campaign_date = matched_payment['date']
+                            elif matched_default:
+                                budget_gbp = CAMPAIGN_DEFAULTS[matched_default]['budget_gbp']
+                                campaign_date = CAMPAIGN_DEFAULTS[matched_default]['campaign_date']
                                 
                             if not campaign_date and not df.empty:
                                 oldest_date = pd.to_datetime(df['completion_date']).min()
@@ -1753,7 +1799,9 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
     for file in text_files:
         try:
             content = file.getvalue().decode('utf-8', errors='ignore')
-            song_name = file.name.replace(' response page text.txt', '').replace(' Response page text.txt', '').replace(' response page text', '').replace('.txt', '').strip()
+            clean_name = re.sub(r'\s*response\s*page\s*text.*', '', file.name, flags=re.IGNORECASE)
+            clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
+            song_name = clean_name.replace('.txt', '').strip()
             parsed_curators = parse_raw_text_content(content, song_name)
             merged = process_single_song_submissions(song_name, parsed_curators, master_csv_df, purchases)
             df = pd.DataFrame(merged)
@@ -2114,7 +2162,7 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
                         if match:
                             song_name = match.group(1).strip()
                     elif line.startswith('TOTAL'):
-                        match = re.search(r'TOTAL\s+[^\d]*([\d\.]+)', line, re.IGNORECASE)
+                        match = re.search(r'TOTAL\s*[^\d]*([\d\.]+)', line, re.IGNORECASE)
                         if match:
                             amount = float(match.group(1))
                 if not song_name:
@@ -2137,7 +2185,9 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
         camps = []
         for file in report_csvs:
             try:
-                song_name = file.name.replace("Musosoup-Campaign-Report-", "").replace(".csv", "").strip()
+                clean_name = file.name.replace("Musosoup-Campaign-Report-", "")
+                clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
+                song_name = clean_name.replace(".csv", "").strip()
                 df = pd.read_csv(file)
                 df.columns = df.columns.str.strip().str.lower()
                 
@@ -2148,12 +2198,24 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
                 budget_gbp = 36.00
                 campaign_date = None
                 song_key = song_name.lower()
-                if song_key in uploaded_payments:
-                    budget_gbp = uploaded_payments[song_key]['amount'] or budget_gbp
-                    campaign_date = uploaded_payments[song_key]['date']
-                elif song_key in CAMPAIGN_DEFAULTS:
-                    budget_gbp = CAMPAIGN_DEFAULTS[song_key]['budget_gbp']
-                    campaign_date = CAMPAIGN_DEFAULTS[song_key]['campaign_date']
+                matched_payment = None
+                for k, pay in uploaded_payments.items():
+                    if k in song_key or song_key in k:
+                        matched_payment = pay
+                        break
+                
+                matched_default = None
+                for k in CAMPAIGN_DEFAULTS:
+                    if k in song_key or song_key in k:
+                        matched_default = k
+                        break
+
+                if matched_payment:
+                    budget_gbp = matched_payment['amount'] or budget_gbp
+                    campaign_date = matched_payment['date']
+                elif matched_default:
+                    budget_gbp = CAMPAIGN_DEFAULTS[matched_default]['budget_gbp']
+                    campaign_date = CAMPAIGN_DEFAULTS[matched_default]['campaign_date']
                     
                 if not campaign_date and not df.empty:
                     oldest_date = pd.to_datetime(df['completion_date']).min()
@@ -2697,7 +2759,13 @@ st.sidebar.subheader("🎯 Executive Filters")
 
 dk_tracks = dk_df['Title'].dropna().unique().tolist() if not dk_df.empty else []
 spot_tracks = spot_df['Release Name'].dropna().unique().tolist() if not spot_df.empty else []
-all_tracks = sorted(list(set(dk_tracks + spot_tracks)))
+s4a_tracks = s4a_df['track_name'].dropna().unique().tolist() if not s4a_df.empty else []
+sh_tracks = submithub_df['song'].dropna().unique().tolist() if not submithub_df.empty else []
+pp_tracks = pp_campaigns_df['song'].dropna().unique().tolist() if not pp_campaigns_df.empty else []
+ms_tracks = ms_campaigns_df['song'].dropna().unique().tolist() if not ms_campaigns_df.empty else []
+ima_tracks = ima_campaigns_df['song'].dropna().unique().tolist() if not ima_campaigns_df.empty else []
+
+all_tracks = sorted(list(set(dk_tracks + spot_tracks + s4a_tracks + sh_tracks + pp_tracks + ms_tracks + ima_tracks)))
 
 selected_view = st.sidebar.selectbox("Track Selection", ["All Catalog (Aggregate)"] + all_tracks)
 
