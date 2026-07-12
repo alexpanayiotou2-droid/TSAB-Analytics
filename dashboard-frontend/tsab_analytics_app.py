@@ -79,6 +79,234 @@ CAMPAIGN_DEFAULTS = {
     }
 }
 
+def parse_date(date_str):
+    if pd.isna(date_str) or not date_str:
+        return None
+    date_str = str(date_str).strip()
+    date_str = re.sub(r'\s+UTC$', '', date_str, flags=re.IGNORECASE)
+    for fmt in ('%Y-%m-%d', '%m/%d/%y', '%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d'):
+        try:
+            return pd.to_datetime(date_str, format=fmt).date().isoformat()
+        except Exception:
+            pass
+    try:
+        return pd.to_datetime(date_str).date().isoformat()
+    except Exception:
+        return None
+
+def parse_numeric(val, default=0.0):
+    if pd.isna(val) or val is None:
+        return default
+    val_str = str(val).replace('$', '').replace(',', '').replace('%', '').strip()
+    if val_str.lower() in ('na', 'null', 'nan', ''):
+        return default
+    try:
+        return float(val_str)
+    except Exception:
+        return default
+
+def parse_int(val, default=0):
+    if pd.isna(val) or val is None:
+        return default
+    val_str = str(val).replace(',', '').strip()
+    if val_str.lower() in ('na', 'null', 'nan', ''):
+        return default
+    try:
+        return int(float(val_str))
+    except Exception:
+        return default
+
+def transform_distrokid_df(df):
+    records = []
+    for idx, row in df.iterrows():
+        try:
+            item = {
+                'date_inserted': parse_date(row.get('Date Inserted')),
+                'reporting_date': parse_date(row.get('Reporting Date')),
+                'sale_month': str(row.get('Sale Month', '')).strip(),
+                'store': str(row.get('Store', '')).strip(),
+                'artist': str(row.get('Artist', '')).strip(),
+                'title': str(row.get('Title', '')).strip(),
+                'isrc': str(row.get('ISRC', '')).strip(),
+                'upc': str(row.get('UPC', '')).strip(),
+                'quantity': parse_int(row.get('Quantity'), 0),
+                'team_percentage': parse_numeric(row.get('Team Percentage'), 100.0),
+                'source_type': str(row.get('Source Type', '')).strip(),
+                'country_of_sale': str(row.get('Country of Sale', '')).strip(),
+                'songwriter_royalties_withheld_usd': parse_numeric(row.get('Songwriter Royalties Withheld (USD)'), 0.0),
+                'earnings_usd': parse_numeric(row.get('Earnings (USD)'), 0.0),
+                'recoup_usd': parse_numeric(row.get('Recoup (USD)'), 0.0)
+            }
+            required = ['reporting_date', 'sale_month', 'store', 'artist', 'title', 'isrc', 'upc', 'country_of_sale']
+            if all(item.get(f) for f in required):
+                records.append(item)
+        except Exception:
+            pass
+    return pd.DataFrame(records)
+
+def transform_spotify_df(df):
+    records = []
+    for idx, row in df.iterrows():
+        try:
+            item = {
+                'release_date': parse_date(row.get('Release Date')),
+                'start_date': parse_date(row.get('Start Date')),
+                'end_date': parse_date(row.get('End Date')),
+                'release_name': str(row.get('Release Name', '')).strip(),
+                'campaign_name': str(row.get('Campaign Name', '')).strip(),
+                'artist_name': str(row.get('Artist Name', '')).strip(),
+                'format': str(row.get('Format', '')).strip(),
+                'release_type': str(row.get('Release Type', '')).strip(),
+                'country_targeting': str(row.get('Country Targeting', '')).strip(),
+                'currency': str(row.get('Currency', 'USD')).strip(),
+                'tax_rate': parse_numeric(row.get('Tax Rate'), 0.0),
+                'budget': parse_numeric(row.get('Budget'), 0.0),
+                'budget_incl_tax': parse_numeric(row.get('Budget (incl. tax)'), 0.0),
+                'spend': parse_numeric(row.get('Spend'), 0.0),
+                'spend_incl_tax': parse_numeric(row.get('Spend (incl. tax)'), 0.0),
+                'segment_targeting': str(row.get('Segment Targeting', '')).strip(),
+                'reach': parse_int(row.get('Reach'), 0),
+                'clicks': parse_int(row.get('Clicks'), 0),
+                'amplified_listeners': parse_int(row.get('Amplified Listeners'), 0),
+                'reactivated_listeners': parse_int(row.get('Reactivated Listeners'), 0),
+                'new_active_listeners': parse_int(row.get('New Active Listeners'), 0),
+                'light_listeners_after_converting': parse_int(row.get('Light Listeners (after converting)'), 0),
+                'moderate_listeners_after_converting': parse_int(row.get('Moderate Listeners (after converting)'), 0),
+                'super_listeners_after_converting': parse_int(row.get('Super Listeners (after converting)'), 0),
+                'converted_listeners': parse_int(row.get('Converted Listeners'), 0),
+                'conversion_rate': parse_numeric(row.get('Conversion Rate'), 0.0),
+                'active_streams_per_listener': parse_numeric(row.get('Active Streams Per Listener'), 0.0),
+                'intent_rate': parse_numeric(row.get('Intent Rate'), 0.0),
+                'playlist_add_rate': parse_numeric(row.get('Playlist Add Rate'), 0.0),
+                'playlist_adds': parse_int(row.get('Playlist Adds'), 0),
+                'save_rate': parse_numeric(row.get('Save Rate'), 0.0),
+                'saves': parse_int(row.get('Saves'), 0),
+                'listeners_of_artists_other_releases': parse_int(row.get("Listeners of Artist's Other Releases"), 0),
+                'active_streams_per_listener_for_artists_other_releases': parse_numeric(row.get("Active Streams Per Listener for Artist's Other Releases"), 0.0),
+                'saves_of_artists_other_releases': parse_int(row.get("Saves of Artist's Other Releases"), 0),
+                'playlist_adds_of_artists_other_releases': parse_int(row.get("Playlist Adds of Artist's Other Releases"), 0)
+            }
+            required = ['start_date', 'end_date', 'release_name', 'campaign_name', 'artist_name']
+            if all(item.get(f) for f in required):
+                records.append(item)
+        except Exception:
+            pass
+    return pd.DataFrame(records)
+
+def save_distrokid_to_db(url, key, df):
+    import urllib.parse
+    headers = {
+        'apikey': key,
+        'Authorization': f'Bearer {key}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+    }
+    ssl_context = ssl.create_default_context()
+    if not df.empty:
+        titles = df['title'].unique()
+        for title in titles:
+            quoted_title = urllib.parse.quote(title)
+            endpoint = f"{url.rstrip('/')}/rest/v1/distrokid_royalties?title=eq.{quoted_title}"
+            req = urllib.request.Request(endpoint, headers=headers, method='DELETE')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception:
+                pass
+        records = df.to_dict(orient='records')
+        for r in records:
+            for k, v in r.items():
+                if isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
+                    r[k] = v.isoformat()
+                elif pd.isna(v):
+                    r[k] = None
+        for i in range(0, len(records), 1000):
+            batch = records[i:i+1000]
+            endpoint = f"{url.rstrip('/')}/rest/v1/distrokid_royalties"
+            payload = json.dumps(batch).encode('utf-8')
+            req = urllib.request.Request(endpoint, data=payload, headers=headers, method='POST')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception as e:
+                raise e
+
+def save_spotify_to_db(url, key, df):
+    import urllib.parse
+    headers = {
+        'apikey': key,
+        'Authorization': f'Bearer {key}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+    }
+    ssl_context = ssl.create_default_context()
+    if not df.empty:
+        names = df['release_name'].unique()
+        for name in names:
+            quoted_name = urllib.parse.quote(name)
+            endpoint = f"{url.rstrip('/')}/rest/v1/spotify_campaign_metrics?release_name=eq.{quoted_name}"
+            req = urllib.request.Request(endpoint, headers=headers, method='DELETE')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception:
+                pass
+        records = df.to_dict(orient='records')
+        for r in records:
+            for k, v in r.items():
+                if isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
+                    r[k] = v.isoformat()
+                elif pd.isna(v):
+                    r[k] = None
+        for i in range(0, len(records), 1000):
+            batch = records[i:i+1000]
+            endpoint = f"{url.rstrip('/')}/rest/v1/spotify_campaign_metrics"
+            payload = json.dumps(batch).encode('utf-8')
+            req = urllib.request.Request(endpoint, data=payload, headers=headers, method='POST')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception as e:
+                raise e
+
+def save_s4a_to_db(url, key, df):
+    import urllib.parse
+    headers = {
+        'apikey': key,
+        'Authorization': f'Bearer {key}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+    }
+    ssl_context = ssl.create_default_context()
+    if not df.empty:
+        tracks = df['track_name'].unique()
+        for track in tracks:
+            quoted_track = urllib.parse.quote(track)
+            endpoint = f"{url.rstrip('/')}/rest/v1/s4a_daily_streams?track_name=eq.{quoted_track}"
+            req = urllib.request.Request(endpoint, headers=headers, method='DELETE')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception:
+                pass
+        records = df.to_dict(orient='records')
+        for r in records:
+            for k, v in r.items():
+                if isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
+                    r[k] = v.isoformat()
+                elif pd.isna(v):
+                    r[k] = None
+        for i in range(0, len(records), 1000):
+            batch = records[i:i+1000]
+            endpoint = f"{url.rstrip('/')}/rest/v1/s4a_daily_streams"
+            payload = json.dumps(batch).encode('utf-8')
+            req = urllib.request.Request(endpoint, data=payload, headers=headers, method='POST')
+            try:
+                with urllib.request.urlopen(req, context=ssl_context) as resp:
+                    pass
+            except Exception as e:
+                raise e
+
 # Inject custom CSS for premium Light Mode branding
 st.markdown(
     """
@@ -605,29 +833,87 @@ with st.sidebar:
     st.header("Update Data")
     st.markdown("Base data loads from Supabase. Drop new files here to **append** to your history.")
     
+    SUPABASE_URL = os.environ.get("SUPABASE_URL")
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+    has_db = bool(SUPABASE_URL and SUPABASE_KEY)
+
     dk_uploads = st.file_uploader("1. Add DistroKid Data", type="csv", accept_multiple_files=True)
     st.caption("📂 *Expects: DistroKid royalty CSV reports (e.g., DistroKid Results 6.12.26.csv)*")
+    if has_db:
+        if st.button("💾 Save DistroKid Uploads to DB", key="save_dk_db_btn", disabled=not dk_uploads, use_container_width=True):
+            with st.spinner("Processing and uploading DistroKid data..."):
+                try:
+                    dfs = []
+                    for file in dk_uploads:
+                        df = pd.read_csv(file)
+                        dfs.append(transform_distrokid_df(df))
+                    if dfs:
+                        final_df = pd.concat(dfs, ignore_index=True)
+                        save_distrokid_to_db(SUPABASE_URL, SUPABASE_KEY, final_df)
+                        st.toast("✅ Successfully saved DistroKid data to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save DistroKid data: {e}")
     dk_freshness = st.empty() 
     
     spot_uploads = st.file_uploader("2. Add Spotify Campaigns", type="csv", accept_multiple_files=True)
     st.caption("📂 *Expects: Spotify Ad Studio campaign report CSVs (e.g., Spotify Campaigns to date 6.12.26.csv)*")
+    if has_db:
+        if st.button("💾 Save Spotify Campaigns to DB", key="save_spot_db_btn", disabled=not spot_uploads, use_container_width=True):
+            with st.spinner("Processing and uploading Spotify campaigns data..."):
+                try:
+                    dfs = []
+                    for file in spot_uploads:
+                        df = pd.read_csv(file)
+                        dfs.append(transform_spotify_df(df))
+                    if dfs:
+                        final_df = pd.concat(dfs, ignore_index=True)
+                        save_spotify_to_db(SUPABASE_URL, SUPABASE_KEY, final_df)
+                        st.toast("✅ Successfully saved Spotify campaigns to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save Spotify campaigns: {e}")
     spot_freshness = st.empty() 
     
     s4a_uploads = st.file_uploader("3. Add S4A Daily Tracks", type="csv", accept_multiple_files=True)
     st.caption("📂 *Expects: S4A daily stream timeline CSVs (e.g., Astronaut-timeline.csv)*")
+    if has_db:
+        if st.button("💾 Save S4A Daily Streams to DB", key="save_s4a_db_btn", disabled=not s4a_uploads, use_container_width=True):
+            with st.spinner("Processing and uploading S4A daily stream data..."):
+                try:
+                    dfs = []
+                    for file in s4a_uploads:
+                        df = pd.read_csv(file)
+                        df.columns = df.columns.str.lower()
+                        if 'date' in df.columns and 'streams' in df.columns:
+                            raw_name = os.path.splitext(file.name)[0]
+                            track_name = raw_name.replace('-timeline', '').replace('_timeline', '').replace(' timeline', '').strip()
+                            df['track_name'] = track_name
+                            df['date'] = df['date'].apply(parse_date)
+                            df['streams'] = df['streams'].apply(lambda x: parse_int(x, 0))
+                            df = df.dropna(subset=['date', 'track_name'])
+                            dfs.append(df[['date', 'streams', 'track_name']])
+                    if dfs:
+                        final_df = pd.concat(dfs, ignore_index=True)
+                        save_s4a_to_db(SUPABASE_URL, SUPABASE_KEY, final_df)
+                        st.toast("✅ Successfully saved S4A daily streams to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save S4A daily streams: {e}")
     
     meta_uploads = st.file_uploader("4. Add Meta Ads", type="csv", accept_multiple_files=True)
     st.caption("📂 *Expects: Meta Ads CSV reports with columns 'Start Date' and 'Amount Spent (USD)'*")
+    st.caption("*(Meta Ads are for temporary local visualization only)*")
 
     submithub_uploads = st.file_uploader("5. Add SubmitHub Data", type=["txt", "csv", "xlsx", "xls"], accept_multiple_files=True)
     st.caption("📂 *Expects: Response page text (.txt), submission history (.csv), purchase history (.xlsx), or pre-merged CSV*")
 
     # Ingest to DB Button for SubmitHub
-    SUPABASE_URL = os.environ.get("SUPABASE_URL")
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-    if submithub_uploads:
-        if SUPABASE_URL and SUPABASE_KEY:
-            if st.button("💾 Save SubmitHub Uploads to DB", key="save_sh_db_btn"):
+    if has_db:
+        if st.button("💾 Save SubmitHub Uploads to DB", key="save_sh_db_btn", disabled=not submithub_uploads, use_container_width=True):
                 with st.spinner("Processing and uploading SubmitHub data..."):
                     try:
                         xlsx_file = None
@@ -837,9 +1123,8 @@ with st.sidebar:
     st.caption("📂 *Expects: (1) Campaign responses PDF (e.g. '[P] Campaign responses for_ Astronaut - Playlist Push.pdf'), (2) Campaign Invoice PDF (e.g. '[P] playlistpush-invoice-480065 - Astronaut.pdf'), or (3) Campaign summary CSV (e.g. 'Socially Acceptable - Playlist Push Campaign Results.csv')*")
 
     # Ingest to DB Button for Playlist Push
-    if playlist_push_uploads:
-        if SUPABASE_URL and SUPABASE_KEY:
-            if st.button("💾 Save Playlist Push Uploads to DB", key="save_pp_db_btn"):
+    if has_db:
+        if st.button("💾 Save Playlist Push Uploads to DB", key="save_pp_db_btn", disabled=not playlist_push_uploads, use_container_width=True):
                 with st.spinner("Processing and uploading Playlist Push data..."):
                     try:
                         summary_csv = None
@@ -1043,9 +1328,8 @@ with st.sidebar:
     st.caption("📂 *Expects: (1) Campaign report CSV (e.g. 'Musosoup-Campaign-Report-SH2BA.csv') or (2) payment receipt PDF (e.g. 'Musosoup-payment-SH2BA.pdf')*")
 
     # Ingest to DB Button for Musosoup
-    if musosoup_uploads:
-        if SUPABASE_URL and SUPABASE_KEY:
-            if st.button("💾 Save Musosoup Uploads to DB", key="save_ms_db_btn"):
+    if has_db:
+        if st.button("💾 Save Musosoup Uploads to DB", key="save_ms_db_btn", disabled=not musosoup_uploads, use_container_width=True):
                 with st.spinner("Processing and uploading Musosoup data..."):
                     try:
                         report_csvs = []
@@ -1177,9 +1461,8 @@ with st.sidebar:
     st.caption("📂 *Expects: (1) client portal results text (.txt) or (2) purchase invoice receipt PDF (e.g. 'Ryan Waczek_ Invoice astronaut.pdf')*")
 
     # Ingest to DB Button for IMA
-    if ima_uploads:
-        if SUPABASE_URL and SUPABASE_KEY:
-            if st.button("💾 Save IMA Uploads to DB", key="save_ima_db_btn"):
+    if has_db:
+        if st.button("💾 Save IMA Uploads to DB", key="save_ima_db_btn", disabled=not ima_uploads, use_container_width=True):
                 with st.spinner("Processing and uploading Indie Music Academy data..."):
                     try:
                         invoice_pdfs = []
@@ -1344,9 +1627,8 @@ with st.sidebar:
     st.caption("📂 *Expects: Instagram Post Campaign CSV or Excel reports (e.g. 'Insta Campaigns-Jun-1-2023-Jul-1-2026.xlsx')*")
 
     # Ingest to DB Button for Instagram
-    if instagram_uploads:
-        if SUPABASE_URL and SUPABASE_KEY:
-            if st.button("💾 Save Instagram Uploads to DB", key="save_ig_db_btn"):
+    if has_db:
+        if st.button("💾 Save Instagram Uploads to DB", key="save_ig_db_btn", disabled=not instagram_uploads, use_container_width=True):
                 with st.spinner("Processing and uploading Instagram campaigns..."):
                     try:
                         dfs = []
