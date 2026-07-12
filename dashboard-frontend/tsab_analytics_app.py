@@ -914,210 +914,210 @@ with st.sidebar:
     # Ingest to DB Button for SubmitHub
     if has_db:
         if st.button("💾 Save SubmitHub Uploads to DB", key="save_sh_db_btn", disabled=not submithub_uploads, use_container_width=True):
-                with st.spinner("Processing and uploading SubmitHub data..."):
-                    try:
-                        xlsx_file = None
-                        history_csv_file = None
-                        text_files = []
-                        pre_parsed_csvs = []
-                        for file in submithub_uploads:
-                            if file.name.endswith('.xlsx') or file.name.endswith('.xls') or 'purchase' in file.name.lower():
-                                xlsx_file = file
-                            elif file.name.endswith('.csv'):
-                                try:
-                                    df_check = pd.read_csv(file, nrows=5)
-                                    if 'Song' in df_check.columns and 'Outlet' in df_check.columns and 'Campaign date' in df_check.columns:
-                                        history_csv_file = file
-                                    else:
-                                        pre_parsed_csvs.append(file)
-                                except Exception:
-                                    pre_parsed_csvs.append(file)
-                            elif file.name.endswith('.txt') or 'text' in file.name.lower():
-                                text_files.append(file)
-
-                        uploaded_purchases = []
-                        if xlsx_file:
-                            purchase_df = pd.read_excel(xlsx_file)
-                            purchase_df.columns = purchase_df.columns.str.strip().str.lower()
-                            if all(col in purchase_df.columns for col in ['date', 'paid', 'credits']):
-                                for idx, row in purchase_df.iterrows():
-                                    raw_date = row['date']
-                                    p_date = pd.to_datetime(raw_date).isoformat() if not isinstance(raw_date, pd.Timestamp) else raw_date.isoformat()
-                                    uploaded_purchases.append({
-                                        'purchase_date': p_date,
-                                        'amount_paid_usd': float(row['paid']),
-                                        'credits_purchased': int(row['credits'])
-                                    })
-
-                        db_purchases = []
-                        if not submithub_purchases_base_df.empty:
-                            for idx, row in submithub_purchases_base_df.iterrows():
-                                db_purchases.append({
-                                    'purchase_date': pd.to_datetime(row['purchase_date']).isoformat(),
-                                    'amount_paid_usd': float(row['amount_paid_usd']),
-                                    'credits_purchased': int(row['credits_purchased'])
-                                })
-                        purchases = uploaded_purchases if uploaded_purchases else db_purchases
-
-                        master_csv_df = pd.DataFrame()
-                        if history_csv_file:
-                            master_csv_df = pd.read_csv(history_csv_file)
-                        else:
-                            fallback_path = "data-backend/SubmitHub/The Socially Acceptable Band submission history (Jun 29, 2026).csv"
-                            if os.path.exists(fallback_path):
-                                master_csv_df = pd.read_csv(fallback_path)
-
-                        def get_cost_per_credit_btn(campaign_date_str, purchase_list):
-                            if not purchase_list:
-                                return 0.85
-                            def to_naive(dt_val):
-                                dt = pd.to_datetime(dt_val)
-                                return dt.tz_localize(None) if dt.tzinfo is not None else dt
+            with st.spinner("Processing and uploading SubmitHub data..."):
+                try:
+                    xlsx_file = None
+                    history_csv_file = None
+                    text_files = []
+                    pre_parsed_csvs = []
+                    for file in submithub_uploads:
+                        if file.name.endswith('.xlsx') or file.name.endswith('.xls') or 'purchase' in file.name.lower():
+                            xlsx_file = file
+                        elif file.name.endswith('.csv'):
                             try:
-                                campaign_dt = to_naive(campaign_date_str)
+                                df_check = pd.read_csv(file, nrows=5)
+                                if 'Song' in df_check.columns and 'Outlet' in df_check.columns and 'Campaign date' in df_check.columns:
+                                    history_csv_file = file
+                                else:
+                                    pre_parsed_csvs.append(file)
                             except Exception:
-                                campaign_dt = to_naive(pd.Timestamp.now())
-                            sorted_p = sorted(purchase_list, key=lambda x: to_naive(x['purchase_date']))
-                            best_cost = None
-                            for p in sorted_p:
-                                p_dt = to_naive(p['purchase_date'])
-                                if p_dt <= campaign_dt:
-                                    best_cost = p['amount_paid_usd'] / p['credits_purchased']
-                            if best_cost is None:
-                                first = sorted_p[0]
-                                best_cost = first['amount_paid_usd'] / first['credits_purchased']
-                            return best_cost
+                                pre_parsed_csvs.append(file)
+                        elif file.name.endswith('.txt') or 'text' in file.name.lower():
+                            text_files.append(file)
 
-                        def process_single_song_submissions_btn(song_name, parsed_curators, csv_df, purchase_list):
-                            if csv_df.empty:
-                                final_records = []
-                                for curator in parsed_curators:
-                                    credits = curator['credits_spent']
-                                    cost_usd = 0.00 if curator['is_refunded'] else round(credits * 0.85, 2)
-                                    final_records.append({
-                                        'song': song_name,
-                                        'campaign_url': None,
-                                        'campaign_date': None,
-                                        'outlet': curator['outlet'],
-                                        'outlet_type': curator['outlet_type'],
-                                        'outlet_url': None,
-                                        'outlet_country': None,
-                                        'action': curator['status'],
-                                        'action_timestamp': None,
-                                        'feedback': curator['feedback'],
-                                        'listen_time_seconds': None,
-                                        'credits_spent': credits,
-                                        'credit_type': curator['credit_type'],
-                                        'is_refunded': curator['is_refunded'],
-                                        'cost_usd': cost_usd,
-                                        'share_destination': curator['share_destination'],
-                                        'estimated_reach': curator['estimated_reach']
-                                    })
-                                return final_records
-                            song_df = csv_df[csv_df['Song'].str.contains(song_name, case=False, na=False)].copy()
-                            if song_df.empty:
-                                final_records = []
-                                for curator in parsed_curators:
-                                    credits = curator['credits_spent']
-                                    cost_usd = 0.00 if curator['is_refunded'] else round(credits * 0.85, 2)
-                                    final_records.append({
-                                        'song': song_name,
-                                        'campaign_url': None,
-                                        'campaign_date': None,
-                                        'outlet': curator['outlet'],
-                                        'outlet_type': curator['outlet_type'],
-                                        'outlet_url': None,
-                                        'outlet_country': None,
-                                        'action': curator['status'],
-                                        'action_timestamp': None,
-                                        'feedback': curator['feedback'],
-                                        'listen_time_seconds': None,
-                                        'credits_spent': credits,
-                                        'credit_type': curator['credit_type'],
-                                        'is_refunded': curator['is_refunded'],
-                                        'cost_usd': cost_usd,
-                                        'share_destination': curator['share_destination'],
-                                        'estimated_reach': curator['estimated_reach']
-                                    })
-                                return final_records
-                            grouped = song_df.groupby('Outlet')
+                    uploaded_purchases = []
+                    if xlsx_file:
+                        purchase_df = pd.read_excel(xlsx_file)
+                        purchase_df.columns = purchase_df.columns.str.strip().str.lower()
+                        if all(col in purchase_df.columns for col in ['date', 'paid', 'credits']):
+                            for idx, row in purchase_df.iterrows():
+                                raw_date = row['date']
+                                p_date = pd.to_datetime(raw_date).isoformat() if not isinstance(raw_date, pd.Timestamp) else raw_date.isoformat()
+                                uploaded_purchases.append({
+                                    'purchase_date': p_date,
+                                    'amount_paid_usd': float(row['paid']),
+                                    'credits_purchased': int(row['credits'])
+                                })
+
+                    db_purchases = []
+                    if not submithub_purchases_base_df.empty:
+                        for idx, row in submithub_purchases_base_df.iterrows():
+                            db_purchases.append({
+                                'purchase_date': pd.to_datetime(row['purchase_date']).isoformat(),
+                                'amount_paid_usd': float(row['amount_paid_usd']),
+                                'credits_purchased': int(row['credits_purchased'])
+                            })
+                    purchases = uploaded_purchases if uploaded_purchases else db_purchases
+
+                    master_csv_df = pd.DataFrame()
+                    if history_csv_file:
+                        master_csv_df = pd.read_csv(history_csv_file)
+                    else:
+                        fallback_path = "data-backend/SubmitHub/The Socially Acceptable Band submission history (Jun 29, 2026).csv"
+                        if os.path.exists(fallback_path):
+                            master_csv_df = pd.read_csv(fallback_path)
+
+                    def get_cost_per_credit_btn(campaign_date_str, purchase_list):
+                        if not purchase_list:
+                            return 0.85
+                        def to_naive(dt_val):
+                            dt = pd.to_datetime(dt_val)
+                            return dt.tz_localize(None) if dt.tzinfo is not None else dt
+                        try:
+                            campaign_dt = to_naive(campaign_date_str)
+                        except Exception:
+                            campaign_dt = to_naive(pd.Timestamp.now())
+                        sorted_p = sorted(purchase_list, key=lambda x: to_naive(x['purchase_date']))
+                        best_cost = None
+                        for p in sorted_p:
+                            p_dt = to_naive(p['purchase_date'])
+                            if p_dt <= campaign_dt:
+                                best_cost = p['amount_paid_usd'] / p['credits_purchased']
+                        if best_cost is None:
+                            first = sorted_p[0]
+                            best_cost = first['amount_paid_usd'] / first['credits_purchased']
+                        return best_cost
+
+                    def process_single_song_submissions_btn(song_name, parsed_curators, csv_df, purchase_list):
+                        if csv_df.empty:
                             final_records = []
                             for curator in parsed_curators:
-                                curator_name = curator['outlet']
-                                matched_group = None
-                                for name, group in grouped:
-                                    if name.strip().lower() == curator_name.strip().lower():
-                                        matched_group = group
-                                        break
-                                if matched_group is None:
-                                    campaign_url = None
-                                    campaign_date = None
-                                    outlet_url = None
-                                    outlet_country = None
-                                    action_timestamp = None
-                                    listen_time = None
-                                else:
-                                    first_row = matched_group.iloc[0]
-                                    campaign_url = first_row.get('Campaign url')
-                                    campaign_date = first_row.get('Campaign date')
-                                    outlet_url = first_row.get('Outlet url')
-                                    outlet_country = first_row.get('Outlet country')
-                                    if pd.notna(campaign_date):
-                                        campaign_date = pd.to_datetime(campaign_date).isoformat()
-                                    action_timestamp = pd.to_datetime(matched_group['Action timestamp']).max()
-                                    if pd.notna(action_timestamp):
-                                        action_timestamp = action_timestamp.isoformat()
-                                    listen_time = int(matched_group['Listen time (seconds)'].max()) if pd.notna(matched_group['Listen time (seconds)'].max()) else None
-                                cost_per_credit = get_cost_per_credit_btn(campaign_date or pd.Timestamp.now(), purchases)
-                                credits_spent = curator['credits_spent']
-                                if curator['is_refunded']:
-                                    cost_usd = 0.00
-                                else:
-                                    cost_usd = round(credits_spent * cost_per_credit, 4)
-                                record = {
+                                credits = curator['credits_spent']
+                                cost_usd = 0.00 if curator['is_refunded'] else round(credits * 0.85, 2)
+                                final_records.append({
                                     'song': song_name,
-                                    'campaign_url': campaign_url,
-                                    'campaign_date': campaign_date,
-                                    'outlet': curator_name,
+                                    'campaign_url': None,
+                                    'campaign_date': None,
+                                    'outlet': curator['outlet'],
                                     'outlet_type': curator['outlet_type'],
-                                    'outlet_url': outlet_url,
-                                    'outlet_country': outlet_country,
+                                    'outlet_url': None,
+                                    'outlet_country': None,
                                     'action': curator['status'],
-                                    'action_timestamp': action_timestamp,
+                                    'action_timestamp': None,
                                     'feedback': curator['feedback'],
-                                    'listen_time_seconds': listen_time,
-                                    'credits_spent': credits_spent,
+                                    'listen_time_seconds': None,
+                                    'credits_spent': credits,
                                     'credit_type': curator['credit_type'],
                                     'is_refunded': curator['is_refunded'],
                                     'cost_usd': cost_usd,
                                     'share_destination': curator['share_destination'],
                                     'estimated_reach': curator['estimated_reach']
-                                }
-                                final_records.append(record)
+                                })
                             return final_records
+                        song_df = csv_df[csv_df['Song'].str.contains(song_name, case=False, na=False)].copy()
+                        if song_df.empty:
+                            final_records = []
+                            for curator in parsed_curators:
+                                credits = curator['credits_spent']
+                                cost_usd = 0.00 if curator['is_refunded'] else round(credits * 0.85, 2)
+                                final_records.append({
+                                    'song': song_name,
+                                    'campaign_url': None,
+                                    'campaign_date': None,
+                                    'outlet': curator['outlet'],
+                                    'outlet_type': curator['outlet_type'],
+                                    'outlet_url': None,
+                                    'outlet_country': None,
+                                    'action': curator['status'],
+                                    'action_timestamp': None,
+                                    'feedback': curator['feedback'],
+                                    'listen_time_seconds': None,
+                                    'credits_spent': credits,
+                                    'credit_type': curator['credit_type'],
+                                    'is_refunded': curator['is_refunded'],
+                                    'cost_usd': cost_usd,
+                                    'share_destination': curator['share_destination'],
+                                    'estimated_reach': curator['estimated_reach']
+                                })
+                            return final_records
+                        grouped = song_df.groupby('Outlet')
+                        final_records = []
+                        for curator in parsed_curators:
+                            curator_name = curator['outlet']
+                            matched_group = None
+                            for name, group in grouped:
+                                if name.strip().lower() == curator_name.strip().lower():
+                                    matched_group = group
+                                    break
+                            if matched_group is None:
+                                campaign_url = None
+                                campaign_date = None
+                                outlet_url = None
+                                outlet_country = None
+                                action_timestamp = None
+                                listen_time = None
+                            else:
+                                first_row = matched_group.iloc[0]
+                                campaign_url = first_row.get('Campaign url')
+                                campaign_date = first_row.get('Campaign date')
+                                outlet_url = first_row.get('Outlet url')
+                                outlet_country = first_row.get('Outlet country')
+                                if pd.notna(campaign_date):
+                                    campaign_date = pd.to_datetime(campaign_date).isoformat()
+                                action_timestamp = pd.to_datetime(matched_group['Action timestamp']).max()
+                                if pd.notna(action_timestamp):
+                                    action_timestamp = action_timestamp.isoformat()
+                                listen_time = int(matched_group['Listen time (seconds)'].max()) if pd.notna(matched_group['Listen time (seconds)'].max()) else None
+                            cost_per_credit = get_cost_per_credit_btn(campaign_date or pd.Timestamp.now(), purchases)
+                            credits_spent = curator['credits_spent']
+                            if curator['is_refunded']:
+                                cost_usd = 0.00
+                            else:
+                                cost_usd = round(credits_spent * cost_per_credit, 4)
+                            record = {
+                                'song': song_name,
+                                'campaign_url': campaign_url,
+                                'campaign_date': campaign_date,
+                                'outlet': curator_name,
+                                'outlet_type': curator['outlet_type'],
+                                'outlet_url': outlet_url,
+                                'outlet_country': outlet_country,
+                                'action': curator['status'],
+                                'action_timestamp': action_timestamp,
+                                'feedback': curator['feedback'],
+                                'listen_time_seconds': listen_time,
+                                'credits_spent': credits_spent,
+                                'credit_type': curator['credit_type'],
+                                'is_refunded': curator['is_refunded'],
+                                'cost_usd': cost_usd,
+                                'share_destination': curator['share_destination'],
+                                'estimated_reach': curator['estimated_reach']
+                            }
+                            final_records.append(record)
+                        return final_records
 
-                        submithub_dataframes = []
-                        for file in text_files:
-                            content = file.getvalue().decode('utf-8', errors='ignore')
-                            clean_name = re.sub(r'\s*response\s*page\s*text.*', '', file.name, flags=re.IGNORECASE)
-                            clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
-                            song_name = clean_name.replace('.txt', '').strip()
-                            parsed_curators = parse_raw_text_content(content, song_name)
-                            merged = process_single_song_submissions_btn(song_name, parsed_curators, master_csv_df, purchases)
-                            df = pd.DataFrame(merged)
-                            if not df.empty:
-                                submithub_dataframes.append(df)
-                        
-                        if submithub_dataframes:
-                            final_sh_df = pd.concat(submithub_dataframes, ignore_index=True)
-                            save_submithub_to_db(SUPABASE_URL, SUPABASE_KEY, final_sh_df, pd.DataFrame(uploaded_purchases))
-                            st.toast("✅ Successfully saved SubmitHub data to Supabase!")
-                            st.cache_data.clear()
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to save data: {e}")
-        else:
-            st.info("💡 Set Supabase credentials to save SubmitHub uploads permanently.")
+                    submithub_dataframes = []
+                    for file in text_files:
+                        content = file.getvalue().decode('utf-8', errors='ignore')
+                        clean_name = re.sub(r'\s*response\s*page\s*text.*', '', file.name, flags=re.IGNORECASE)
+                        clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
+                        song_name = clean_name.replace('.txt', '').strip()
+                        parsed_curators = parse_raw_text_content(content, song_name)
+                        merged = process_single_song_submissions_btn(song_name, parsed_curators, master_csv_df, purchases)
+                        df = pd.DataFrame(merged)
+                        if not df.empty:
+                            submithub_dataframes.append(df)
+                    
+                    if submithub_dataframes:
+                        final_sh_df = pd.concat(submithub_dataframes, ignore_index=True)
+                        save_submithub_to_db(SUPABASE_URL, SUPABASE_KEY, final_sh_df, pd.DataFrame(uploaded_purchases))
+                        st.toast("✅ Successfully saved SubmitHub data to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save data: {e}")
+    else:
+        st.info("💡 Set Supabase credentials to save SubmitHub uploads permanently.")
 
     playlist_push_uploads = st.file_uploader("6. Add Playlist Push Data", type=["pdf", "csv"], accept_multiple_files=True)
     st.caption("📂 *Expects: (1) Campaign responses PDF (e.g. '[P] Campaign responses for_ Astronaut - Playlist Push.pdf'), (2) Campaign Invoice PDF (e.g. '[P] playlistpush-invoice-480065 - Astronaut.pdf'), or (3) Campaign summary CSV (e.g. 'Socially Acceptable - Playlist Push Campaign Results.csv')*")
@@ -1125,204 +1125,204 @@ with st.sidebar:
     # Ingest to DB Button for Playlist Push
     if has_db:
         if st.button("💾 Save Playlist Push Uploads to DB", key="save_pp_db_btn", disabled=not playlist_push_uploads, use_container_width=True):
-                with st.spinner("Processing and uploading Playlist Push data..."):
-                    try:
-                        summary_csv = None
-                        invoice_pdfs = []
-                        response_pdfs = []
-                        for file in playlist_push_uploads:
-                            if file.name.endswith('.csv'):
-                                summary_csv = file
-                            elif file.name.endswith('.pdf'):
-                                if 'invoice' in file.name.lower():
-                                    invoice_pdfs.append(file)
-                                else:
-                                    response_pdfs.append(file)
-                        
-                        invoices_data = {}
-                        for file in invoice_pdfs:
-                            reader = pypdf.PdfReader(file)
-                            text = ""
-                            for page in reader.pages:
-                                text += page.extract_text() + "\n"
-                            lines = [line.strip() for line in text.split('\n')]
-                            issued_date = None
-                            amount_paid = None
-                            song_name = None
-                            for i, line in enumerate(lines):
-                                if 'Issued:' in line:
-                                    if i + 1 < len(lines):
-                                        date_candidate = lines[i+1].strip()
-                                        try:
-                                            issued_date = pd.to_datetime(date_candidate).date()
-                                        except Exception:
-                                            pass
-                                elif 'Amount paid' in line:
-                                    match = re.search(r'\$?([\d,]+\.?\d*)', line)
-                                    if match:
-                                        amount_paid = float(match.group(1).replace(',', ''))
-                                elif 'Spotify campaign' in line:
-                                    if i + 1 < len(lines):
-                                        cand = lines[i+1].strip()
-                                        cand_clean = cand.replace('Socially Acceptable', '').strip()
-                                        match_song = re.match(r'^([a-zA-Z\s]+)\s+\d+x', cand_clean)
-                                        if match_song:
-                                            song_name = match_song.group(1).strip()
-                            if not song_name and 'invoice-' in file.name.lower():
-                                parts = file.name.split('-')
-                                if len(parts) >= 3:
-                                    song_name = parts[-1].replace('.pdf', '').strip()
-                            if song_name:
-                                invoices_data[song_name.lower()] = {
-                                    'song': song_name,
-                                    'issued_date': issued_date,
-                                    'amount_paid': amount_paid
-                                }
-                        
-                        parsed_placements = []
-                        for file in response_pdfs:
-                            song_name_from_file = None
-                            if 'responses for_' in file.name.lower():
-                                parts = file.name.split('responses for_')
-                                if len(parts) >= 2:
-                                    song_name_from_file = parts[1].split('-')[0].strip()
-                            reader = pypdf.PdfReader(file)
-                            text = ""
-                            for page in reader.pages:
-                                text += page.extract_text() + "\n"
-                            lines = [line.strip() for line in text.split('\n')]
-                            song_name = song_name_from_file
-                            if not song_name and len(lines) > 0:
-                                match_song = re.match(r'^(.+?)\s+by\s+Socially\s+Acceptable', lines[0], re.IGNORECASE)
-                                if match_song:
-                                    song_name = match_song.group(1).strip()
-                            print_date = datetime.now()
-                            for line in lines:
-                                match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4}),?\s+(\d{1,2}:\d{2}\s*[APM]*)', line, re.IGNORECASE)
-                                if match:
+            with st.spinner("Processing and uploading Playlist Push data..."):
+                try:
+                    summary_csv = None
+                    invoice_pdfs = []
+                    response_pdfs = []
+                    for file in playlist_push_uploads:
+                        if file.name.endswith('.csv'):
+                            summary_csv = file
+                        elif file.name.endswith('.pdf'):
+                            if 'invoice' in file.name.lower():
+                                invoice_pdfs.append(file)
+                            else:
+                                response_pdfs.append(file)
+                    
+                    invoices_data = {}
+                    for file in invoice_pdfs:
+                        reader = pypdf.PdfReader(file)
+                        text = ""
+                        for page in reader.pages:
+                            text += page.extract_text() + "\n"
+                        lines = [line.strip() for line in text.split('\n')]
+                        issued_date = None
+                        amount_paid = None
+                        song_name = None
+                        for i, line in enumerate(lines):
+                            if 'Issued:' in line:
+                                if i + 1 < len(lines):
+                                    date_candidate = lines[i+1].strip()
                                     try:
-                                        date_str = match.group(1)
-                                        parts = date_str.split('/')
-                                        if len(parts[2]) == 2:
-                                            parts[2] = '20' + parts[2]
-                                        clean_date_str = '/'.join(parts)
-                                        print_date = pd.to_datetime(clean_date_str)
-                                        break
+                                        issued_date = pd.to_datetime(date_candidate).date()
                                     except Exception:
                                         pass
-                            details_regex = re.compile(
-                                r'([\d,]+)\s+Saves\s+·\s+Curator\s+(.+?)\s+(\d+\s+(?:year|month|day|week)s?\s+ago|a\s+year\s+ago|a\s+month\s+ago|a\s+day\s+ago)\s+#(\d+)\s+Avg\s+(\d+)\s+month[s]?',
-                                re.IGNORECASE
-                            )
-                            i = 0
-                            while i < len(lines):
-                                line = lines[i]
-                                if line.startswith('') or ('saves' in lines[i+1].lower() and 'curator' in lines[i+1].lower() if i+1 < len(lines) else False):
-                                    playlist_name = line.replace('', '').strip()
-                                    i += 1
-                                    if i >= len(lines):
-                                        break
-                                    details_line = lines[i]
-                                    match = details_regex.match(details_line)
-                                    if match:
-                                        saves = int(match.group(1).replace(',', ''))
-                                        curator = match.group(2).strip()
-                                        time_ago = match.group(3).strip()
-                                        index = int(match.group(4))
-                                        avg_duration = int(match.group(5))
-                                        clean_str = time_ago.strip().lower()
-                                        if 'year' in clean_str:
-                                            m_val = re.search(r'(\d+)', clean_str)
-                                            years = int(m_val.group(1)) if m_val else 1
-                                            est_date = print_date - timedelta(days=years * 365)
-                                        elif 'month' in clean_str:
-                                            m_val = re.search(r'(\d+)', clean_str)
-                                            months = int(m_val.group(1)) if m_val else 1
-                                            est_date = print_date - timedelta(days=months * 30.4)
-                                        elif 'week' in clean_str:
-                                            m_val = re.search(r'(\d+)', clean_str)
-                                            weeks = int(m_val.group(1)) if m_val else 1
-                                            est_date = print_date - timedelta(weeks=weeks)
-                                        else:
-                                            est_date = print_date
-                                        parsed_placements.append({
-                                            'song': song_name,
-                                            'playlist_name': playlist_name,
-                                            'curator': curator,
-                                            'saves': saves,
-                                            'added_time_ago': time_ago,
-                                            'estimated_date': est_date.date().isoformat(),
-                                            'playlist_index': index,
-                                            'avg_duration_months': avg_duration
-                                        })
+                            elif 'Amount paid' in line:
+                                match = re.search(r'\$?([\d,]+\.?\d*)', line)
+                                if match:
+                                    amount_paid = float(match.group(1).replace(',', ''))
+                            elif 'Spotify campaign' in line:
+                                if i + 1 < len(lines):
+                                    cand = lines[i+1].strip()
+                                    cand_clean = cand.replace('Socially Acceptable', '').strip()
+                                    match_song = re.match(r'^([a-zA-Z\s]+)\s+\d+x', cand_clean)
+                                    if match_song:
+                                        song_name = match_song.group(1).strip()
+                        if not song_name and 'invoice-' in file.name.lower():
+                            parts = file.name.split('-')
+                            if len(parts) >= 3:
+                                song_name = parts[-1].replace('.pdf', '').strip()
+                        if song_name:
+                            invoices_data[song_name.lower()] = {
+                                'song': song_name,
+                                'issued_date': issued_date,
+                                'amount_paid': amount_paid
+                            }
+                    
+                    parsed_placements = []
+                    for file in response_pdfs:
+                        song_name_from_file = None
+                        if 'responses for_' in file.name.lower():
+                            parts = file.name.split('responses for_')
+                            if len(parts) >= 2:
+                                song_name_from_file = parts[1].split('-')[0].strip()
+                        reader = pypdf.PdfReader(file)
+                        text = ""
+                        for page in reader.pages:
+                            text += page.extract_text() + "\n"
+                        lines = [line.strip() for line in text.split('\n')]
+                        song_name = song_name_from_file
+                        if not song_name and len(lines) > 0:
+                            match_song = re.match(r'^(.+?)\s+by\s+Socially\s+Acceptable', lines[0], re.IGNORECASE)
+                            if match_song:
+                                song_name = match_song.group(1).strip()
+                        print_date = datetime.now()
+                        for line in lines:
+                            match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4}),?\s+(\d{1,2}:\d{2}\s*[APM]*)', line, re.IGNORECASE)
+                            if match:
+                                try:
+                                    date_str = match.group(1)
+                                    parts = date_str.split('/')
+                                    if len(parts[2]) == 2:
+                                        parts[2] = '20' + parts[2]
+                                    clean_date_str = '/'.join(parts)
+                                    print_date = pd.to_datetime(clean_date_str)
+                                    break
+                                except Exception:
+                                    pass
+                        details_regex = re.compile(
+                            r'([\d,]+)\s+Saves\s+·\s+Curator\s+(.+?)\s+(\d+\s+(?:year|month|day|week)s?\s+ago|a\s+year\s+ago|a\s+month\s+ago|a\s+day\s+ago)\s+#(\d+)\s+Avg\s+(\d+)\s+month[s]?',
+                            re.IGNORECASE
+                        )
+                        i = 0
+                        while i < len(lines):
+                            line = lines[i]
+                            if line.startswith('') or ('saves' in lines[i+1].lower() and 'curator' in lines[i+1].lower() if i+1 < len(lines) else False):
+                                playlist_name = line.replace('', '').strip()
                                 i += 1
+                                if i >= len(lines):
+                                    break
+                                details_line = lines[i]
+                                match = details_regex.match(details_line)
+                                if match:
+                                    saves = int(match.group(1).replace(',', ''))
+                                    curator = match.group(2).strip()
+                                    time_ago = match.group(3).strip()
+                                    index = int(match.group(4))
+                                    avg_duration = int(match.group(5))
+                                    clean_str = time_ago.strip().lower()
+                                    if 'year' in clean_str:
+                                        m_val = re.search(r'(\d+)', clean_str)
+                                        years = int(m_val.group(1)) if m_val else 1
+                                        est_date = print_date - timedelta(days=years * 365)
+                                    elif 'month' in clean_str:
+                                        m_val = re.search(r'(\d+)', clean_str)
+                                        months = int(m_val.group(1)) if m_val else 1
+                                        est_date = print_date - timedelta(days=months * 30.4)
+                                    elif 'week' in clean_str:
+                                        m_val = re.search(r'(\d+)', clean_str)
+                                        weeks = int(m_val.group(1)) if m_val else 1
+                                        est_date = print_date - timedelta(weeks=weeks)
+                                    else:
+                                        est_date = print_date
+                                    parsed_placements.append({
+                                        'song': song_name,
+                                        'playlist_name': playlist_name,
+                                        'curator': curator,
+                                        'saves': saves,
+                                        'added_time_ago': time_ago,
+                                        'estimated_date': est_date.date().isoformat(),
+                                        'playlist_index': index,
+                                        'avg_duration_months': avg_duration
+                                    })
+                            i += 1
 
-                        camps = []
-                        if summary_csv:
-                            sdf = pd.read_csv(summary_csv)
-                            sdf.columns = sdf.columns.str.strip().str.lower()
-                            for idx, row in sdf.iterrows():
-                                song_name = row['song'].strip()
-                                budget_str = str(row['campaign budget']).replace('$', '').strip()
-                                budget = float(budget_str)
-                                responses_count = int(row['curator responses'])
-                                adds = int(row['playlist adds'])
-                                reach = int(str(row['playlist followers']).replace(',', '').strip())
-                                popularity = int(row['spotify popularity']) if 'spotify popularity' in row else None
-                                campaign_date = None
-                                if song_name.lower() in invoices_data:
-                                    campaign_date = invoices_data[song_name.lower()]['issued_date']
-                                    if campaign_date:
-                                        campaign_date = campaign_date.isoformat()
-                                if not campaign_date:
-                                    song_placements = [p for p in parsed_placements if p['song'] and p['song'].lower() == song_name.lower()]
-                                    if song_placements:
-                                        oldest = min(song_placements, key=lambda x: x['estimated_date'])
-                                        campaign_date = oldest['estimated_date']
-                                camps.append({
-                                    'song': song_name,
-                                    'campaign_date': campaign_date,
-                                    'budget_usd': budget,
-                                    'total_responses': responses_count,
-                                    'playlist_adds': adds,
-                                    'total_reach': reach,
-                                    'spotify_popularity': popularity
-                                })
-                        else:
-                            songs = set(p['song'] for p in parsed_placements if p['song'])
-                            for song_name in songs:
-                                budget = 0.0
-                                campaign_date = None
-                                if song_name.lower() in invoices_data:
-                                    campaign_date = invoices_data[song_name.lower()]['issued_date']
-                                    if campaign_date:
-                                        campaign_date = campaign_date.isoformat()
-                                    budget = invoices_data[song_name.lower()]['amount_paid'] or 0.0
-                                
+                    camps = []
+                    if summary_csv:
+                        sdf = pd.read_csv(summary_csv)
+                        sdf.columns = sdf.columns.str.strip().str.lower()
+                        for idx, row in sdf.iterrows():
+                            song_name = row['song'].strip()
+                            budget_str = str(row['campaign budget']).replace('$', '').strip()
+                            budget = float(budget_str)
+                            responses_count = int(row['curator responses'])
+                            adds = int(row['playlist adds'])
+                            reach = int(str(row['playlist followers']).replace(',', '').strip())
+                            popularity = int(row['spotify popularity']) if 'spotify popularity' in row else None
+                            campaign_date = None
+                            if song_name.lower() in invoices_data:
+                                campaign_date = invoices_data[song_name.lower()]['issued_date']
+                                if campaign_date:
+                                    campaign_date = campaign_date.isoformat()
+                            if not campaign_date:
                                 song_placements = [p for p in parsed_placements if p['song'] and p['song'].lower() == song_name.lower()]
-                                if not campaign_date and song_placements:
+                                if song_placements:
                                     oldest = min(song_placements, key=lambda x: x['estimated_date'])
                                     campaign_date = oldest['estimated_date']
-                                    
-                                total_saves = sum(p['saves'] for p in song_placements)
-                                camps.append({
-                                    'song': song_name,
-                                    'campaign_date': campaign_date,
-                                    'budget_usd': budget,
-                                    'total_responses': len(song_placements),
-                                    'playlist_adds': len(song_placements),
-                                    'total_reach': total_saves,
-                                    'spotify_popularity': None
-                                })
+                            camps.append({
+                                'song': song_name,
+                                'campaign_date': campaign_date,
+                                'budget_usd': budget,
+                                'total_responses': responses_count,
+                                'playlist_adds': adds,
+                                'total_reach': reach,
+                                'spotify_popularity': popularity
+                            })
+                    else:
+                        songs = set(p['song'] for p in parsed_placements if p['song'])
+                        for song_name in songs:
+                            budget = 0.0
+                            campaign_date = None
+                            if song_name.lower() in invoices_data:
+                                campaign_date = invoices_data[song_name.lower()]['issued_date']
+                                if campaign_date:
+                                    campaign_date = campaign_date.isoformat()
+                                budget = invoices_data[song_name.lower()]['amount_paid'] or 0.0
+                            
+                            song_placements = [p for p in parsed_placements if p['song'] and p['song'].lower() == song_name.lower()]
+                            if not campaign_date and song_placements:
+                                oldest = min(song_placements, key=lambda x: x['estimated_date'])
+                                campaign_date = oldest['estimated_date']
                                 
-                        save_playlist_push_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(parsed_placements))
-                        st.toast("✅ Successfully saved Playlist Push data to Supabase!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to save data: {e}")
-        else:
-            st.info("💡 Set Supabase credentials to save Playlist Push uploads permanently.")
+                            total_saves = sum(p['saves'] for p in song_placements)
+                            camps.append({
+                                'song': song_name,
+                                'campaign_date': campaign_date,
+                                'budget_usd': budget,
+                                'total_responses': len(song_placements),
+                                'playlist_adds': len(song_placements),
+                                'total_reach': total_saves,
+                                'spotify_popularity': None
+                            })
+                            
+                    save_playlist_push_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(parsed_placements))
+                    st.toast("✅ Successfully saved Playlist Push data to Supabase!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save data: {e}")
+    else:
+        st.info("💡 Set Supabase credentials to save Playlist Push uploads permanently.")
 
     musosoup_uploads = st.file_uploader("7. Add Musosoup Data", type=["csv", "pdf"], accept_multiple_files=True)
     st.caption("📂 *Expects: (1) Campaign report CSV (e.g. 'Musosoup-Campaign-Report-SH2BA.csv') or (2) payment receipt PDF (e.g. 'Musosoup-payment-SH2BA.pdf')*")
@@ -1330,132 +1330,132 @@ with st.sidebar:
     # Ingest to DB Button for Musosoup
     if has_db:
         if st.button("💾 Save Musosoup Uploads to DB", key="save_ms_db_btn", disabled=not musosoup_uploads, use_container_width=True):
-                with st.spinner("Processing and uploading Musosoup data..."):
-                    try:
-                        report_csvs = []
-                        payment_pdfs = []
-                        for file in musosoup_uploads:
-                            if file.name.endswith('.csv'):
-                                report_csvs.append(file)
-                            elif file.name.endswith('.pdf'):
-                                payment_pdfs.append(file)
-                                
-                        uploaded_payments = {}
-                        for file in payment_pdfs:
-                            reader = pypdf.PdfReader(file)
-                            text = ""
-                            for page in reader.pages:
-                                text += page.extract_text() + "\n"
-                            lines = [line.strip() for line in text.split('\n')]
-                            date_val = None
-                            amount = None
-                            song_name = None
-                            for i, line in enumerate(lines):
-                                if line.startswith('Date:'):
-                                    date_cand = line.replace('Date:', '').strip()
-                                    try:
-                                        date_val = pd.to_datetime(date_cand, dayfirst=True).date().isoformat()
-                                    except Exception:
-                                        pass
-                                elif 'Campaign activation' in line:
-                                    match = re.search(r'for\s+(?:Socially\s+Acceptable\s*-\s*)?([a-zA-Z0-9\s]+)', line, re.IGNORECASE)
-                                    if match:
-                                        song_name = match.group(1).strip()
-                                elif line.startswith('TOTAL'):
-                                    match = re.search(r'TOTAL\s*[^\d]*([\d\.]+)', line, re.IGNORECASE)
-                                    if match:
-                                        amount = float(match.group(1))
-                            if not song_name:
-                                fn = file.name.lower()
-                                for k in ['astronaut', 'great riddance', 'sh2ba']:
-                                    if k in fn:
-                                        song_name = k
-                                        break
-                            if song_name:
-                                uploaded_payments[song_name.lower()] = {
-                                    'song': song_name,
-                                    'date': date_val,
-                                    'amount': amount
-                                }
-                                
-                        camps = []
-                        placements = []
-                        for file in report_csvs:
-                            clean_name = file.name.replace("Musosoup-Campaign-Report-", "")
-                            clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
-                            song_name = clean_name.replace(".csv", "").strip()
-                            df = pd.read_csv(file)
-                            df.columns = df.columns.str.strip().str.lower()
+            with st.spinner("Processing and uploading Musosoup data..."):
+                try:
+                    report_csvs = []
+                    payment_pdfs = []
+                    for file in musosoup_uploads:
+                        if file.name.endswith('.csv'):
+                            report_csvs.append(file)
+                        elif file.name.endswith('.pdf'):
+                            payment_pdfs.append(file)
                             
-                            df['placement_type'] = df['completion_url'].apply(get_placement_type)
-                            playlist_adds = len(df[df['placement_type'] == 'Playlist'])
-                            other_adds = len(df) - playlist_adds
-                            
-                            budget_gbp = 36.00
-                            campaign_date = None
-                            song_key = song_name.lower()
-                            matched_payment = None
-                            for k, pay in uploaded_payments.items():
-                                if k in song_key or song_key in k:
-                                    matched_payment = pay
+                    uploaded_payments = {}
+                    for file in payment_pdfs:
+                        reader = pypdf.PdfReader(file)
+                        text = ""
+                        for page in reader.pages:
+                            text += page.extract_text() + "\n"
+                        lines = [line.strip() for line in text.split('\n')]
+                        date_val = None
+                        amount = None
+                        song_name = None
+                        for i, line in enumerate(lines):
+                            if line.startswith('Date:'):
+                                date_cand = line.replace('Date:', '').strip()
+                                try:
+                                    date_val = pd.to_datetime(date_cand, dayfirst=True).date().isoformat()
+                                except Exception:
+                                    pass
+                            elif 'Campaign activation' in line:
+                                match = re.search(r'for\s+(?:Socially\s+Acceptable\s*-\s*)?([a-zA-Z0-9\s]+)', line, re.IGNORECASE)
+                                if match:
+                                    song_name = match.group(1).strip()
+                            elif line.startswith('TOTAL'):
+                                match = re.search(r'TOTAL\s*[^\d]*([\d\.]+)', line, re.IGNORECASE)
+                                if match:
+                                    amount = float(match.group(1))
+                        if not song_name:
+                            fn = file.name.lower()
+                            for k in ['astronaut', 'great riddance', 'sh2ba']:
+                                if k in fn:
+                                    song_name = k
                                     break
-                            
-                            matched_default = None
-                            for k in CAMPAIGN_DEFAULTS:
-                                if k in song_key or song_key in k:
-                                    matched_default = k
-                                    break
-
-                            if matched_payment:
-                                budget_gbp = matched_payment['amount'] or budget_gbp
-                                campaign_date = matched_payment['date']
-                            elif matched_default:
-                                budget_gbp = CAMPAIGN_DEFAULTS[matched_default]['budget_gbp']
-                                campaign_date = CAMPAIGN_DEFAULTS[matched_default]['campaign_date']
-                                
-                            if not campaign_date and not df.empty:
-                                oldest_date = pd.to_datetime(df['completion_date']).min()
-                                campaign_date = oldest_date.date().isoformat()
-                                
-                            budget_usd = round(budget_gbp * GBP_TO_USD, 2)
-                            camps.append({
+                        if song_name:
+                            uploaded_payments[song_name.lower()] = {
                                 'song': song_name,
-                                'campaign_date': campaign_date,
-                                'budget_gbp': budget_gbp,
-                                'budget_usd': budget_usd,
-                                'playlist_adds': playlist_adds,
-                                'other_adds': other_adds
-                            })
+                                'date': date_val,
+                                'amount': amount
+                            }
                             
-                            for idx, row in df.iterrows():
-                                c_gbp = float(row.get('contribution', 0.0))
-                                c_usd = round(c_gbp * GBP_TO_USD, 2)
-                                comp_date = None
-                                if pd.notna(row.get('completion_date')):
-                                    try:
-                                        comp_date = pd.to_datetime(row['completion_date']).isoformat()
-                                    except Exception:
-                                        pass
-                                placements.append({
-                                    'song': song_name,
-                                    'curator': row.get('curator'),
-                                    'publication': row.get('publication'),
-                                    'completion_date': comp_date,
-                                    'accept_type': row.get('accept_type', 'Free'),
-                                    'contribution_gbp': c_gbp,
-                                    'contribution_usd': c_usd,
-                                    'completion_url': row.get('completion_url'),
-                                    'placement_type': row.get('placement_type')
-                                })
-                        if camps:
-                            save_musosoup_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(placements))
-                            st.toast("✅ Successfully saved Musosoup data to Supabase!")
-                            st.cache_data.clear()
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to save data: {e}")
-        else:
-            st.info("💡 Set Supabase credentials to save Musosoup uploads permanently.")
+                    camps = []
+                    placements = []
+                    for file in report_csvs:
+                        clean_name = file.name.replace("Musosoup-Campaign-Report-", "")
+                        clean_name = re.sub(r'\s*\(\d+\.\d+\).*', '', clean_name, flags=re.IGNORECASE)
+                        song_name = clean_name.replace(".csv", "").strip()
+                        df = pd.read_csv(file)
+                        df.columns = df.columns.str.strip().str.lower()
+                        
+                        df['placement_type'] = df['completion_url'].apply(get_placement_type)
+                        playlist_adds = len(df[df['placement_type'] == 'Playlist'])
+                        other_adds = len(df) - playlist_adds
+                        
+                        budget_gbp = 36.00
+                        campaign_date = None
+                        song_key = song_name.lower()
+                        matched_payment = None
+                        for k, pay in uploaded_payments.items():
+                            if k in song_key or song_key in k:
+                                matched_payment = pay
+                                break
+                        
+                        matched_default = None
+                        for k in CAMPAIGN_DEFAULTS:
+                            if k in song_key or song_key in k:
+                                matched_default = k
+                                break
+
+                        if matched_payment:
+                            budget_gbp = matched_payment['amount'] or budget_gbp
+                            campaign_date = matched_payment['date']
+                        elif matched_default:
+                            budget_gbp = CAMPAIGN_DEFAULTS[matched_default]['budget_gbp']
+                            campaign_date = CAMPAIGN_DEFAULTS[matched_default]['campaign_date']
+                            
+                        if not campaign_date and not df.empty:
+                            oldest_date = pd.to_datetime(df['completion_date']).min()
+                            campaign_date = oldest_date.date().isoformat()
+                            
+                        budget_usd = round(budget_gbp * GBP_TO_USD, 2)
+                        camps.append({
+                            'song': song_name,
+                            'campaign_date': campaign_date,
+                            'budget_gbp': budget_gbp,
+                            'budget_usd': budget_usd,
+                            'playlist_adds': playlist_adds,
+                            'other_adds': other_adds
+                        })
+                        
+                        for idx, row in df.iterrows():
+                            c_gbp = float(row.get('contribution', 0.0))
+                            c_usd = round(c_gbp * GBP_TO_USD, 2)
+                            comp_date = None
+                            if pd.notna(row.get('completion_date')):
+                                try:
+                                    comp_date = pd.to_datetime(row['completion_date']).isoformat()
+                                except Exception:
+                                    pass
+                            placements.append({
+                                'song': song_name,
+                                'curator': row.get('curator'),
+                                'publication': row.get('publication'),
+                                'completion_date': comp_date,
+                                'accept_type': row.get('accept_type', 'Free'),
+                                'contribution_gbp': c_gbp,
+                                'contribution_usd': c_usd,
+                                'completion_url': row.get('completion_url'),
+                                'placement_type': row.get('placement_type')
+                            })
+                    if camps:
+                        save_musosoup_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(placements))
+                        st.toast("✅ Successfully saved Musosoup data to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save data: {e}")
+    else:
+        st.info("💡 Set Supabase credentials to save Musosoup uploads permanently.")
 
     ima_uploads = st.file_uploader("8. Add Indie Music Academy Data", type=["csv", "pdf", "txt"], accept_multiple_files=True)
     st.caption("📂 *Expects: (1) client portal results text (.txt) or (2) purchase invoice receipt PDF (e.g. 'Ryan Waczek_ Invoice astronaut.pdf')*")
@@ -1463,165 +1463,165 @@ with st.sidebar:
     # Ingest to DB Button for IMA
     if has_db:
         if st.button("💾 Save IMA Uploads to DB", key="save_ima_db_btn", disabled=not ima_uploads, use_container_width=True):
-                with st.spinner("Processing and uploading Indie Music Academy data..."):
-                    try:
-                        invoice_pdfs = []
-                        result_txts = []
-                        for file in ima_uploads:
-                            if file.name.endswith('.pdf'):
-                                invoice_pdfs.append(file)
-                            elif file.name.endswith('.txt'):
-                                result_txts.append(file)
+            with st.spinner("Processing and uploading Indie Music Academy data..."):
+                try:
+                    invoice_pdfs = []
+                    result_txts = []
+                    for file in ima_uploads:
+                        if file.name.endswith('.pdf'):
+                            invoice_pdfs.append(file)
+                        elif file.name.endswith('.txt'):
+                            result_txts.append(file)
+                            
+                    uploaded_camps = {}
+                    for file in invoice_pdfs:
+                        reader = pypdf.PdfReader(file)
+                        text = ""
+                        for page in reader.pages:
+                            text += page.extract_text() + "\n"
+                        lines = [line.strip() for line in text.split('\n')]
+                        
+                        invoice_date = None
+                        amount = None
+                        song_name = None
+                        invoice_id = None
+                        guaranteed_streams = 0
+                        package_name = "Spotify Playlist Promotion"
+                        
+                        for i, line in enumerate(lines):
+                            if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d+(st|nd|rd|th)?\s+\d{4}', line, re.IGNORECASE):
+                                try:
+                                    clean_date = re.sub(r'(st|nd|rd|th)', '', line, flags=re.IGNORECASE)
+                                    invoice_date = pd.to_datetime(clean_date).date().isoformat()
+                                except Exception:
+                                    pass
+                            elif line.startswith('Invoice '):
+                                invoice_id = line.replace('Invoice ', '').strip()
+                            elif 'Total' in line and i + 1 < len(lines):
+                                next_line = lines[i+1].strip()
+                                match = re.search(r'\$?([\d,]+\.?\d*)', next_line)
+                                if match:
+                                    amount = float(match.group(1).replace(',', ''))
+                            elif 'Socially Acceptable - ' in line:
+                                song_name = line.replace('Socially Acceptable - ', '').strip()
+                            elif 'Guaranteed Real Streams' in line:
+                                match_streams = re.search(r'([\d,]+)\s+Guaranteed', line, re.IGNORECASE)
+                                if match_streams:
+                                    guaranteed_streams = int(match_streams.group(1).replace(',', ''))
+                        if not song_name:
+                            fn = file.name.lower()
+                            if 'astronaut' in fn:
+                                song_name = 'Astronaut'
+                        if song_name:
+                            uploaded_camps[song_name.lower()] = {
+                                'song': song_name,
+                                'campaign_date': invoice_date,
+                                'budget_usd': amount,
+                                'invoice_id': invoice_id,
+                                'package_name': package_name,
+                                'guaranteed_streams': guaranteed_streams
+                            }
+                            
+                    parsed_placements = []
+                    for file in result_txts:
+                        content = file.getvalue().decode('utf-8', errors='ignore')
+                        lines = [line.strip() for line in content.split('\n')]
+                        
+                        song_name = None
+                        for line in lines:
+                            if line.strip() in ['Astronaut', 'sh2ba', 'great riddance']:
+                                song_name = line.strip()
+                                break
+                        if not song_name:
+                            fn = file.name.lower()
+                            if 'astronaut' in fn:
+                                song_name = 'Astronaut'
                                 
-                        uploaded_camps = {}
-                        for file in invoice_pdfs:
-                            reader = pypdf.PdfReader(file)
-                            text = ""
-                            for page in reader.pages:
-                                text += page.extract_text() + "\n"
-                            lines = [line.strip() for line in text.split('\n')]
-                            
-                            invoice_date = None
-                            amount = None
-                            song_name = None
-                            invoice_id = None
-                            guaranteed_streams = 0
-                            package_name = "Spotify Playlist Promotion"
-                            
-                            for i, line in enumerate(lines):
-                                if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d+(st|nd|rd|th)?\s+\d{4}', line, re.IGNORECASE):
-                                    try:
-                                        clean_date = re.sub(r'(st|nd|rd|th)', '', line, flags=re.IGNORECASE)
-                                        invoice_date = pd.to_datetime(clean_date).date().isoformat()
-                                    except Exception:
-                                        pass
-                                elif line.startswith('Invoice '):
-                                    invoice_id = line.replace('Invoice ', '').strip()
-                                elif 'Total' in line and i + 1 < len(lines):
-                                    next_line = lines[i+1].strip()
-                                    match = re.search(r'\$?([\d,]+\.?\d*)', next_line)
-                                    if match:
-                                        amount = float(match.group(1).replace(',', ''))
-                                elif 'Socially Acceptable - ' in line:
-                                    song_name = line.replace('Socially Acceptable - ', '').strip()
-                                elif 'Guaranteed Real Streams' in line:
-                                    match_streams = re.search(r'([\d,]+)\s+Guaranteed', line, re.IGNORECASE)
-                                    if match_streams:
-                                        guaranteed_streams = int(match_streams.group(1).replace(',', ''))
-                            if not song_name:
-                                fn = file.name.lower()
-                                if 'astronaut' in fn:
-                                    song_name = 'Astronaut'
-                            if song_name:
-                                uploaded_camps[song_name.lower()] = {
-                                    'song': song_name,
-                                    'campaign_date': invoice_date,
-                                    'budget_usd': amount,
-                                    'invoice_id': invoice_id,
-                                    'package_name': package_name,
-                                    'guaranteed_streams': guaranteed_streams
-                                }
+                        for idx, line in enumerate(lines):
+                            if 'followers' in line.lower():
+                                followers_match = re.search(r'([\d,]+)\s+followers', line, re.IGNORECASE)
+                                followers = int(followers_match.group(1).replace(',', '')) if followers_match else 0
                                 
-                        parsed_placements = []
-                        for file in result_txts:
-                            content = file.getvalue().decode('utf-8', errors='ignore')
-                            lines = [line.strip() for line in content.split('\n')]
-                            
-                            song_name = None
-                            for line in lines:
-                                if line.strip() in ['Astronaut', 'sh2ba', 'great riddance']:
-                                    song_name = line.strip()
-                                    break
-                            if not song_name:
-                                fn = file.name.lower()
-                                if 'astronaut' in fn:
-                                    song_name = 'Astronaut'
-                                    
-                            for idx, line in enumerate(lines):
-                                if 'followers' in line.lower():
-                                    followers_match = re.search(r'([\d,]+)\s+followers', line, re.IGNORECASE)
-                                    followers = int(followers_match.group(1).replace(',', '')) if followers_match else 0
-                                    
-                                    curator = None
-                                    platform = 'Spotify'
-                                    playlist_name = None
-                                    
-                                    for backtrack in range(1, 10):
-                                        if idx - backtrack >= 0:
-                                            bt_line = lines[idx - backtrack].strip()
-                                            if bt_line.startswith('by '):
-                                                curator = bt_line.replace('by ', '').strip()
-                                                if idx - backtrack - 1 >= 0:
-                                                    plat_cand = lines[idx - backtrack - 1].strip()
-                                                    if plat_cand:
-                                                        platform = plat_cand
-                                                        
-                                                for pl_backtrack in range(backtrack + 2, backtrack + 10):
-                                                    if idx - pl_backtrack >= 0:
-                                                        pl_line = lines[idx - pl_backtrack].strip()
-                                                        if pl_line and pl_line not in [
-                                                            'Dashboard', 'Campaigns', 'Artists', 'Contact support', 
-                                                            'Manage billing', 'Settings', 'Theme', 'Results Available', 
-                                                            'Campaign progress', 'Artist on Spotify', 'Track on Spotify', 
-                                                            'Campaign Delivery', 'Results & deliverables', 
-                                                            'Published placements, reports, and campaign results.'
-                                                        ]:
-                                                            playlist_name = pl_line
-                                                            break
-                                                break
-                                                
-                                    pub_date = None
-                                    for forwardtrack in range(1, 10):
-                                        if idx + forwardtrack < len(lines):
-                                            f_line = lines[idx + forwardtrack].strip()
-                                            if f_line.startswith('Published '):
-                                                date_str = f_line.replace('Published ', '').strip()
-                                                try:
-                                                    pub_date = pd.to_datetime(date_str).date().isoformat()
-                                                except Exception:
-                                                    pass
-                                                break
-                                                
-                                    if playlist_name:
-                                        parsed_placements.append({
-                                            'song': song_name,
-                                            'playlist_name': playlist_name,
-                                            'platform': platform,
-                                            'curator': curator,
-                                            'followers': followers,
-                                            'published_date': pub_date
-                                        })
-                                        
-                        unique_songs = set(uploaded_camps.keys()).union(set(p['song'].lower() for p in parsed_placements if p['song']))
-                        camps = []
-                        for s_key in unique_songs:
-                            if s_key in uploaded_camps:
-                                camps.append(uploaded_camps[s_key])
-                            else:
-                                s_name = s_key.capitalize()
-                                song_placements = [p for p in parsed_placements if p['song'] and p['song'].lower() == s_key]
+                                curator = None
+                                platform = 'Spotify'
+                                playlist_name = None
+                                
+                                for backtrack in range(1, 10):
+                                    if idx - backtrack >= 0:
+                                        bt_line = lines[idx - backtrack].strip()
+                                        if bt_line.startswith('by '):
+                                            curator = bt_line.replace('by ', '').strip()
+                                            if idx - backtrack - 1 >= 0:
+                                                plat_cand = lines[idx - backtrack - 1].strip()
+                                                if plat_cand:
+                                                    platform = plat_cand
+                                                    
+                                            for pl_backtrack in range(backtrack + 2, backtrack + 10):
+                                                if idx - pl_backtrack >= 0:
+                                                    pl_line = lines[idx - pl_backtrack].strip()
+                                                    if pl_line and pl_line not in [
+                                                        'Dashboard', 'Campaigns', 'Artists', 'Contact support', 
+                                                        'Manage billing', 'Settings', 'Theme', 'Results Available', 
+                                                        'Campaign progress', 'Artist on Spotify', 'Track on Spotify', 
+                                                        'Campaign Delivery', 'Results & deliverables', 
+                                                        'Published placements, reports, and campaign results.'
+                                                    ]:
+                                                        playlist_name = pl_line
+                                                        break
+                                            break
+                                            
                                 pub_date = None
-                                if song_placements:
-                                    dates = [p['published_date'] for p in song_placements if p['published_date']]
-                                    if dates:
-                                        pub_date = min(dates)
-                                camps.append({
-                                    'song': s_name,
-                                    'campaign_date': pub_date,
-                                    'budget_usd': 0.0,
-                                    'invoice_id': None,
-                                    'package_name': "Spotify Playlist Promotion",
-                                    'guaranteed_streams': 0
-                                })
-                        if camps:
-                            save_ima_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(parsed_placements))
-                            st.toast("✅ Successfully saved Indie Music Academy data to Supabase!")
-                            st.cache_data.clear()
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to save data: {e}")
-        else:
-            st.info("💡 Set Supabase credentials to save Indie Music Academy uploads permanently.")
+                                for forwardtrack in range(1, 10):
+                                    if idx + forwardtrack < len(lines):
+                                        f_line = lines[idx + forwardtrack].strip()
+                                        if f_line.startswith('Published '):
+                                            date_str = f_line.replace('Published ', '').strip()
+                                            try:
+                                                pub_date = pd.to_datetime(date_str).date().isoformat()
+                                            except Exception:
+                                                pass
+                                            break
+                                            
+                                if playlist_name:
+                                    parsed_placements.append({
+                                        'song': song_name,
+                                        'playlist_name': playlist_name,
+                                        'platform': platform,
+                                        'curator': curator,
+                                        'followers': followers,
+                                        'published_date': pub_date
+                                    })
+                                    
+                    unique_songs = set(uploaded_camps.keys()).union(set(p['song'].lower() for p in parsed_placements if p['song']))
+                    camps = []
+                    for s_key in unique_songs:
+                        if s_key in uploaded_camps:
+                            camps.append(uploaded_camps[s_key])
+                        else:
+                            s_name = s_key.capitalize()
+                            song_placements = [p for p in parsed_placements if p['song'] and p['song'].lower() == s_key]
+                            pub_date = None
+                            if song_placements:
+                                dates = [p['published_date'] for p in song_placements if p['published_date']]
+                                if dates:
+                                    pub_date = min(dates)
+                            camps.append({
+                                'song': s_name,
+                                'campaign_date': pub_date,
+                                'budget_usd': 0.0,
+                                'invoice_id': None,
+                                'package_name': "Spotify Playlist Promotion",
+                                'guaranteed_streams': 0
+                            })
+                    if camps:
+                        save_ima_to_db(SUPABASE_URL, SUPABASE_KEY, pd.DataFrame(camps), pd.DataFrame(parsed_placements))
+                        st.toast("✅ Successfully saved Indie Music Academy data to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save data: {e}")
+    else:
+        st.info("💡 Set Supabase credentials to save Indie Music Academy uploads permanently.")
 
     instagram_uploads = st.file_uploader("9. Add Instagram Campaigns", type=["csv", "xlsx"], accept_multiple_files=True)
     st.caption("📂 *Expects: Instagram Post Campaign CSV or Excel reports (e.g. 'Insta Campaigns-Jun-1-2023-Jul-1-2026.xlsx')*")
@@ -1629,58 +1629,58 @@ with st.sidebar:
     # Ingest to DB Button for Instagram
     if has_db:
         if st.button("💾 Save Instagram Uploads to DB", key="save_ig_db_btn", disabled=not instagram_uploads, use_container_width=True):
-                with st.spinner("Processing and uploading Instagram campaigns..."):
-                    try:
-                        dfs = []
-                        for file in instagram_uploads:
-                            if file.name.endswith(('.xlsx', '.xls')):
-                                df = pd.read_excel(file)
+            with st.spinner("Processing and uploading Instagram campaigns..."):
+                try:
+                    dfs = []
+                    for file in instagram_uploads:
+                        if file.name.endswith(('.xlsx', '.xls')):
+                            df = pd.read_excel(file)
+                        else:
+                            df = pd.read_csv(file)
+                        campaigns = []
+                        for idx, row in df.iterrows():
+                            if 'Start' in df.columns:
+                                rep_starts = pd.to_datetime(row.get('Start'), errors='coerce')
                             else:
-                                df = pd.read_csv(file)
-                            campaigns = []
-                            for idx, row in df.iterrows():
-                                if 'Start' in df.columns:
-                                    rep_starts = pd.to_datetime(row.get('Start'), errors='coerce')
-                                else:
-                                    rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
-                                    
-                                if 'Reporting ends' in df.columns:
-                                    rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
-                                else:
-                                    rep_ends = pd.to_datetime(row.get('Ends'), errors='coerce')
-                                    
-                                ends = pd.to_datetime(row.get('Ends'), errors='coerce')
-                                c_name = row.get('Campaign name')
-                                if pd.isna(c_name) or not str(c_name).strip():
-                                    continue
-                                campaigns.append({
-                                    'reporting_starts': rep_starts.date().isoformat() if pd.notna(rep_starts) else None,
-                                    'reporting_ends': rep_ends.date().isoformat() if pd.notna(rep_ends) else None,
-                                    'campaign_name': str(c_name).strip(),
-                                    'campaign_delivery': str(row.get('Campaign delivery', '')).strip(),
-                                    'results': int(pd.to_numeric(row.get('Results'), errors='coerce').fillna(0)),
-                                    'result_indicator': str(row.get('Result indicator', '')).strip(),
-                                    'reach': int(pd.to_numeric(row.get('Reach'), errors='coerce').fillna(0)),
-                                    'frequency': float(pd.to_numeric(row.get('Frequency'), errors='coerce').fillna(0.0)),
-                                    'amount_spent_usd': float(pd.to_numeric(row.get('Amount spent (USD)'), errors='coerce').fillna(0.0)),
-                                    'ends_date': ends.date().isoformat() if pd.notna(ends) else None,
-                                    'impressions': int(pd.to_numeric(row.get('Impressions'), errors='coerce').fillna(0)),
-                                    'link_clicks': int(pd.to_numeric(row.get('Link clicks'), errors='coerce').fillna(0)),
-                                    'cpc_usd': float(pd.to_numeric(row.get('CPC (cost per link click) (USD)'), errors='coerce').fillna(0.0)),
-                                    'ctr': float(pd.to_numeric(row.get('CTR (link click-through rate)'), errors='coerce').fillna(0.0)),
-                                    'clicks_all': int(pd.to_numeric(row.get('Clicks (all)'), errors='coerce').fillna(0))
-                                })
-                            if campaigns:
-                                dfs.append(pd.DataFrame(campaigns))
-                        if dfs:
-                            save_instagram_to_db(SUPABASE_URL, SUPABASE_KEY, pd.concat(dfs, ignore_index=True))
-                            st.toast("✅ Successfully saved Instagram campaigns to Supabase!")
-                            st.cache_data.clear()
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to save data: {e}")
-        else:
-            st.info("💡 Set Supabase credentials to save Instagram uploads permanently.")
+                                rep_starts = pd.to_datetime(row.get('Reporting starts'), errors='coerce')
+                                
+                            if 'Reporting ends' in df.columns:
+                                rep_ends = pd.to_datetime(row.get('Reporting ends'), errors='coerce')
+                            else:
+                                rep_ends = pd.to_datetime(row.get('Ends'), errors='coerce')
+                                
+                            ends = pd.to_datetime(row.get('Ends'), errors='coerce')
+                            c_name = row.get('Campaign name')
+                            if pd.isna(c_name) or not str(c_name).strip():
+                                continue
+                            campaigns.append({
+                                'reporting_starts': rep_starts.date().isoformat() if pd.notna(rep_starts) else None,
+                                'reporting_ends': rep_ends.date().isoformat() if pd.notna(rep_ends) else None,
+                                'campaign_name': str(c_name).strip(),
+                                'campaign_delivery': str(row.get('Campaign delivery', '')).strip(),
+                                'results': int(pd.to_numeric(row.get('Results'), errors='coerce').fillna(0)),
+                                'result_indicator': str(row.get('Result indicator', '')).strip(),
+                                'reach': int(pd.to_numeric(row.get('Reach'), errors='coerce').fillna(0)),
+                                'frequency': float(pd.to_numeric(row.get('Frequency'), errors='coerce').fillna(0.0)),
+                                'amount_spent_usd': float(pd.to_numeric(row.get('Amount spent (USD)'), errors='coerce').fillna(0.0)),
+                                'ends_date': ends.date().isoformat() if pd.notna(ends) else None,
+                                'impressions': int(pd.to_numeric(row.get('Impressions'), errors='coerce').fillna(0)),
+                                'link_clicks': int(pd.to_numeric(row.get('Link clicks'), errors='coerce').fillna(0)),
+                                'cpc_usd': float(pd.to_numeric(row.get('CPC (cost per link click) (USD)'), errors='coerce').fillna(0.0)),
+                                'ctr': float(pd.to_numeric(row.get('CTR (link click-through rate)'), errors='coerce').fillna(0.0)),
+                                'clicks_all': int(pd.to_numeric(row.get('Clicks (all)'), errors='coerce').fillna(0))
+                            })
+                        if campaigns:
+                            dfs.append(pd.DataFrame(campaigns))
+                    if dfs:
+                        save_instagram_to_db(SUPABASE_URL, SUPABASE_KEY, pd.concat(dfs, ignore_index=True))
+                        st.toast("✅ Successfully saved Instagram campaigns to Supabase!")
+                        st.cache_data.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save data: {e}")
+    else:
+        st.info("💡 Set Supabase credentials to save Instagram uploads permanently.")
 
 
 
