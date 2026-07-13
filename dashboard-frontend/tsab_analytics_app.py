@@ -3400,20 +3400,19 @@ tab_trends, tab_pr, tab_strategy, tab_playbook = st.tabs([
 ])
 
 with tab_trends:
-    # Daily streams and Instagram timelines chart
-    st.markdown("#### 📈 Daily Streams & Instagram Ad Campaign Timelines")
-    st.markdown("This timeline maps your Spotify daily streams against the run windows of Instagram ad campaigns to help you identify correlated stream spikes.")
+    st.markdown("#### 📈 Daily Streams & Unified Campaign Timeline")
+    st.markdown("This chart aligns your Spotify daily streams with duration-based ad campaigns (Instagram/Spotify Showcase) and point-in-time playlist placements (SubmitHub, Musosoup, PP, IMA).")
     
     if s4a_df.empty:
         st.info("💡 Awaiting Spotify for Artists daily timeline track data to visualize stream trends.")
     else:
+        # 1. Main Spotify Streams Line Chart
         s4a_daily = s4a_df.groupby('date')['streams'].sum().reset_index()
         s4a_daily['date'] = pd.to_datetime(s4a_daily['date'])
         
         if not s4a_daily.empty:
-            # S4A Streams Line
             line = alt.Chart(s4a_daily).mark_line(color='#1DB954', strokeWidth=2).encode(
-                x=alt.X('date:T', title='Date'),
+                x=alt.X('date:T', title=None), # X axis title hidden to prevent duplication with concatenated chart
                 y=alt.Y('streams:Q', title='Daily Spotify Streams'),
                 tooltip=[
                     alt.Tooltip('date:T', title='Date', format='%Y-%m-%d'),
@@ -3421,29 +3420,114 @@ with tab_trends:
                 ]
             ).properties(height=260)
             
+            # 2. Build the Unified Timeline Dataset
+            timeline_events = []
+            
+            # A. Instagram Campaigns (Duration-based)
             if not instagram_df.empty:
-                # Gantt-style horizontal bars for campaigns
-                gantt = alt.Chart(instagram_df).mark_bar(
+                for idx, row in instagram_df.iterrows():
+                    if pd.notna(row['reporting_starts']) and pd.notna(row['ends_date']):
+                        timeline_events.append({
+                            'Label': row['campaign_name'],
+                            'Start': pd.to_datetime(row['reporting_starts']),
+                            'End': pd.to_datetime(row['ends_date']),
+                            'Channel': 'Instagram Ads',
+                            'Detail': f"Spend: ${row['amount_spent_usd']:.2f} | Reach: {row['reach']:,} | Clicks: {row['link_clicks']:,}"
+                        })
+                        
+            # B. Spotify Showcase campaigns (Duration-based)
+            if not spot_df.empty:
+                for idx, row in spot_df.iterrows():
+                    if pd.notna(row['Start Date']) and pd.notna(row['End Date']) and row['Spend'] > 0:
+                        timeline_events.append({
+                            'Label': row['Campaign Name'],
+                            'Start': pd.to_datetime(row['Start Date']),
+                            'End': pd.to_datetime(row['End Date']),
+                            'Channel': 'Spotify Showcase',
+                            'Detail': f"Spend: ${row['Spend']:.2f} | Saves: {row['Saves']:.0f} | Converted Listeners: {row['Converted Listeners']:.0f}"
+                        })
+            
+            # C. SubmitHub Placements (Point-in-time events)
+            if not submithub_df.empty:
+                approvals = submithub_df[submithub_df['action'] == 'Approved']
+                for idx, row in approvals.iterrows():
+                    date = pd.to_datetime(row['campaign_date'])
+                    if pd.notna(date):
+                        timeline_events.append({
+                            'Label': f"SH: {row['outlet']}",
+                            'Start': date,
+                            'End': date + pd.Timedelta(days=1), # 1 day visual width
+                            'Channel': 'SubmitHub',
+                            'Detail': f"Curator: {row['outlet']} ({row['outlet_type']}) | Followers: {row['estimated_reach']:,} | Cost: ${row['cost_usd']:.2f}"
+                        })
+                        
+            # D. Playlist Push Placements (Point-in-time events)
+            if not pp_placements_df.empty:
+                for idx, row in pp_placements_df.iterrows():
+                    date = pd.to_datetime(row['estimated_date'])
+                    if pd.notna(date):
+                        timeline_events.append({
+                            'Label': f"PP: {row['playlist_name']}",
+                            'Start': date,
+                            'End': date + pd.Timedelta(days=1),
+                            'Channel': 'Playlist Push',
+                            'Detail': f"Playlist: {row['playlist_name']} | Curator: {row['curator']} | Saves: {row['saves']:.0f}"
+                        })
+                        
+            # E. Musosoup Placements (Point-in-time events)
+            if not ms_placements_df.empty:
+                for idx, row in ms_placements_df.iterrows():
+                    date = pd.to_datetime(row['completion_date'])
+                    if pd.notna(date):
+                        timeline_events.append({
+                            'Label': f"MS: {row['publication']}",
+                            'Start': date,
+                            'End': date + pd.Timedelta(days=1),
+                            'Channel': 'Musosoup',
+                            'Detail': f"Curator: {row['curator']} | Cost: ${row['contribution_usd']:.2f} | Type: {row['placement_type']}"
+                        })
+                        
+            # F. Indie Music Academy Placements (Point-in-time events)
+            if not ima_placements_df.empty:
+                for idx, row in ima_placements_df.iterrows():
+                    date = pd.to_datetime(row['published_date'])
+                    if pd.notna(date):
+                        timeline_events.append({
+                            'Label': f"IMA: {row['playlist_name']}",
+                            'Start': date,
+                            'End': date + pd.Timedelta(days=1),
+                            'Channel': 'Indie Music Academy',
+                            'Detail': f"Playlist: {row['playlist_name']} | Curator: {row['curator']} | Followers: {row['followers']:,}"
+                        })
+            
+            timeline_df = pd.DataFrame(timeline_events)
+            
+            if not timeline_df.empty:
+                # 3. Gantt-Style Stacked Timeline Chart (Sharing X-Axis)
+                timeline_chart = alt.Chart(timeline_df).mark_bar(
                     height=14,
-                    color='#E1306C',
-                    opacity=0.75,
                     cornerRadius=4
                 ).encode(
-                    x=alt.X('reporting_starts:T', title=None),
-                    x2='ends_date:T',
-                    y=alt.Y('campaign_name:N', title='IG Campaigns', sort='x', axis=alt.Axis(labelLimit=250, labelFontSize=10, title=None)),
+                    x=alt.X('Start:T', title='Date'),
+                    x2='End:T',
+                    y=alt.Y('Channel:N', title=None, sort=[
+                        'Instagram Ads', 'Spotify Showcase', 'SubmitHub', 'Playlist Push', 'Musosoup', 'Indie Music Academy'
+                    ], axis=alt.Axis(labelLimit=250, labelFontSize=10)),
+                    color=alt.Color('Channel:N', scale=alt.Scale(
+                        domain=[
+                            'Instagram Ads', 'Spotify Showcase', 'SubmitHub', 'Playlist Push', 'Musosoup', 'Indie Music Academy'
+                        ],
+                        range=['#E1306C', '#1DB954', '#FF603B', '#007DFF', '#10B981', '#8B5CF6']
+                    ), legend=None),
                     tooltip=[
-                        alt.Tooltip('campaign_name:N', title='Campaign'),
-                        alt.Tooltip('reporting_starts:T', title='Starts', format='%Y-%m-%d'),
-                        alt.Tooltip('ends_date:T', title='Ends', format='%Y-%m-%d'),
-                        alt.Tooltip('amount_spent_usd:Q', title='Spend (USD)', format='$.2f'),
-                        alt.Tooltip('reach:Q', title='Reach', format=','),
-                        alt.Tooltip('link_clicks:Q', title='Link Clicks', format=',')
+                        alt.Tooltip('Label:N', title='Placement/Campaign'),
+                        alt.Tooltip('Channel:N', title='Channel'),
+                        alt.Tooltip('Start:T', title='Date / Start', format='%Y-%m-%d'),
+                        alt.Tooltip('Detail:N', title='Performance details')
                     ]
-                ).properties(height=140)
+                ).properties(height=200)
                 
-                # Stack them vertically and share the X-axis
-                chart = alt.vconcat(line, gantt).resolve_scale(x='shared').interactive()
+                chart = alt.vconcat(line, timeline_chart).resolve_scale(x='shared').interactive()
             else:
                 chart = line.interactive()
                 
