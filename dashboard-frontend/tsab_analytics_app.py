@@ -683,7 +683,7 @@ def save_submithub_to_db(url, key, df, purchases_df=None):
         existing_df = pd.DataFrame(existing_pur)
         combined = pd.concat([existing_df, purchases_df], ignore_index=True)
         if 'purchase_date' in combined.columns:
-            combined['purchase_date'] = pd.to_datetime(combined['purchase_date']).dt.date.astype(str)
+            combined['purchase_date'] = pd.to_datetime(combined['purchase_date'], format='mixed', utc=True).dt.date.astype(str)
             combined = combined.drop_duplicates(subset=['purchase_date'])
             
             clear_endpoint = f"{url.rstrip('/')}/rest/v1/submithub_credit_purchases?id=not.is.null"
@@ -1192,7 +1192,7 @@ with st.sidebar:
                                 outlet_country = first_row.get('Outlet country')
                                 if pd.notna(campaign_date):
                                     campaign_date = pd.to_datetime(campaign_date).isoformat()
-                                action_timestamp = pd.to_datetime(matched_group['Action timestamp']).max()
+                                action_timestamp = pd.to_datetime(matched_group['Action timestamp'], format='mixed', utc=True).max()
                                 if pd.notna(action_timestamp):
                                     action_timestamp = action_timestamp.isoformat()
                                 listen_time = int(matched_group['Listen time (seconds)'].max()) if pd.notna(matched_group['Listen time (seconds)'].max()) else None
@@ -2066,7 +2066,7 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
                 outlet_country = first_row.get('Outlet country')
                 if pd.notna(campaign_date):
                     campaign_date = pd.to_datetime(campaign_date).isoformat()
-                action_timestamp = pd.to_datetime(matched_group['Action timestamp']).max()
+                action_timestamp = pd.to_datetime(matched_group['Action timestamp'], format='mixed', utc=True).max()
                 if pd.notna(action_timestamp):
                     action_timestamp = action_timestamp.isoformat()
                 listen_time = int(matched_group['Listen time (seconds)'].max()) if pd.notna(matched_group['Listen time (seconds)'].max()) else None

@@ -289,7 +289,7 @@ def process_submissions(song_name, parsed_curators, master_csv_path, purchases):
                 campaign_date = pd.to_datetime(campaign_date).isoformat()
             
             # Timestamps and listen times
-            action_timestamp = pd.to_datetime(matched_group['Action timestamp']).max()
+            action_timestamp = pd.to_datetime(matched_group['Action timestamp'], format='mixed', utc=True).max()
             if pd.notna(action_timestamp):
                 action_timestamp = action_timestamp.isoformat()
                 
