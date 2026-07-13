@@ -927,11 +927,16 @@ with st.sidebar:
                         elif file.name.endswith('.csv'):
                             try:
                                 df_check = pd.read_csv(file, nrows=5)
+                                file.seek(0)
                                 if 'Song' in df_check.columns and 'Outlet' in df_check.columns and 'Campaign date' in df_check.columns:
                                     history_csv_file = file
                                 else:
                                     pre_parsed_csvs.append(file)
                             except Exception:
+                                try:
+                                    file.seek(0)
+                                except Exception:
+                                    pass
                                 pre_parsed_csvs.append(file)
                         elif file.name.endswith('.txt') or 'text' in file.name.lower():
                             text_files.append(file)
@@ -1876,11 +1881,16 @@ def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4
             elif file.name.endswith('.csv'):
                 try:
                     df_check = pd.read_csv(file, nrows=5)
+                    file.seek(0)
                     if 'Song' in df_check.columns and 'Outlet' in df_check.columns and 'Campaign date' in df_check.columns:
                         history_csv_file = file
                     else:
                         pre_parsed_csvs.append(file)
                 except Exception:
+                    try:
+                        file.seek(0)
+                    except Exception:
+                        pass
                     pre_parsed_csvs.append(file)
             elif file.name.endswith('.txt') or 'text' in file.name.lower():
                 text_files.append(file)
