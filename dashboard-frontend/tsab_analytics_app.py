@@ -116,6 +116,103 @@ def parse_int(val, default=0):
     except Exception:
         return default
 
+def parse_raw_text_content(content, song_name):
+    lines = [line.strip() for line in content.split('\n')]
+    curators = []
+    header_pattern = re.compile(
+        r'^(.+?)(Blog|Spotify Playlister|Radio|YouTube Channel|TikToker|Instagrammer|Record Label|Playlister|Influencer)(.*)$', 
+        re.IGNORECASE
+    )
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if '|Add a note' in line:
+            raw_header = line.split('|')[0].strip()
+            match = header_pattern.match(raw_header)
+            if match:
+                curator_name = match.group(1).strip()
+                curator_type = match.group(2).strip()
+            else:
+                curator_name = raw_header
+                curator_type = 'Unknown'
+            
+            i += 1
+            credit_line = lines[i] if i < len(lines) else ''
+            credits = 0
+            credit_type = 'Premium'
+            
+            credit_match = re.search(r'(\d+)\s+credit[s]?\s+\((Premium|Standard)\)', credit_line, re.IGNORECASE)
+            if credit_match:
+                credits = int(credit_match.group(1))
+                credit_type = credit_match.group(2)
+            
+            current_curator = {
+                'song': song_name,
+                'outlet': curator_name,
+                'outlet_type': curator_type,
+                'credits_spent': credits,
+                'credit_type': credit_type,
+                'status': 'Pending',
+                'feedback': '',
+                'is_refunded': False,
+                'cost_usd': 0.0,
+                'share_destination': '',
+                'estimated_reach': None
+            }
+            
+            i += 1
+            detail_lines = []
+            while i < len(lines) and '|Add a note' not in lines[i]:
+                detail_lines.append(lines[i])
+                i += 1
+            
+            details_str = " ".join(detail_lines)
+            if 'Refunded' in details_str or 'Expired' in details_str:
+                current_curator['is_refunded'] = True
+                current_curator['status'] = 'Refunded'
+            elif 'Declined' in details_str:
+                current_curator['status'] = 'Declined'
+            elif 'Approved' in details_str:
+                current_curator['status'] = 'Approved'
+                
+            feedback_candidates = []
+            for dl in detail_lines:
+                dl_clean = dl.strip()
+                if any(x in dl_clean for x in ['Listened', 'Declined', 'Approved', 'Refunded', 'Expired', 'Translate', 'Specific enough', 'Could be better', 'To be shared:', 'in a Spotify', 'Shared', 'Manage', 'Review your experience']):
+                    continue
+                if re.match(r'^\d+\s+(year|month|day|week|hour|minute)s?\s+ago', dl_clean, re.IGNORECASE):
+                    continue
+                if '(Your rating will be kept anonymous)' in dl_clean:
+                    continue
+                if not dl_clean:
+                    continue
+                if re.search(r'\(\d+,?\d*\s+followers\s*\|', dl_clean, re.IGNORECASE):
+                    continue
+                if len(dl_clean) > 5:
+                    feedback_candidates.append(dl_clean)
+            
+            if feedback_candidates:
+                current_curator['feedback'] = " ".join(feedback_candidates)
+                
+            if current_curator['status'] == 'Approved':
+                for dl in detail_lines:
+                    if 'followers' in dl and '|' in dl:
+                        current_curator['share_destination'] = dl.strip()
+                        reach_match = re.search(r'\((\d{1,3}(?:,\d{3})*)\s+followers', dl, re.IGNORECASE)
+                        if reach_match:
+                            current_curator['estimated_reach'] = int(reach_match.group(1).replace(',', ''))
+            
+            if current_curator['is_refunded']:
+                current_curator['cost_usd'] = 0.0
+            else:
+                current_curator['cost_usd'] = round(credits * 0.85, 2)
+                
+            curators.append(current_curator)
+            i -= 1
+        i += 1
+    return curators
+
 def transform_distrokid_df(df):
     records = []
     for idx, row in df.iterrows():
@@ -1719,102 +1816,6 @@ if (dk_base_df.empty and not dk_uploads) or (spot_base_df.empty and not spot_upl
     st.stop()
 
 # --- 3. DATA PROCESSING & AUTO-STITCHING ---
-def parse_raw_text_content(content, song_name):
-    lines = [line.strip() for line in content.split('\n')]
-    curators = []
-    header_pattern = re.compile(
-        r'^(.+?)(Blog|Spotify Playlister|Radio|YouTube Channel|TikToker|Instagrammer|Record Label|Playlister|Influencer)(.*)$', 
-        re.IGNORECASE
-    )
-    
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if '|Add a note' in line:
-            raw_header = line.split('|')[0].strip()
-            match = header_pattern.match(raw_header)
-            if match:
-                curator_name = match.group(1).strip()
-                curator_type = match.group(2).strip()
-            else:
-                curator_name = raw_header
-                curator_type = 'Unknown'
-            
-            i += 1
-            credit_line = lines[i] if i < len(lines) else ''
-            credits = 0
-            credit_type = 'Premium'
-            
-            credit_match = re.search(r'(\d+)\s+credit[s]?\s+\((Premium|Standard)\)', credit_line, re.IGNORECASE)
-            if credit_match:
-                credits = int(credit_match.group(1))
-                credit_type = credit_match.group(2)
-            
-            current_curator = {
-                'song': song_name,
-                'outlet': curator_name,
-                'outlet_type': curator_type,
-                'credits_spent': credits,
-                'credit_type': credit_type,
-                'status': 'Pending',
-                'feedback': '',
-                'is_refunded': False,
-                'cost_usd': 0.0,
-                'share_destination': '',
-                'estimated_reach': None
-            }
-            
-            i += 1
-            detail_lines = []
-            while i < len(lines) and '|Add a note' not in lines[i]:
-                detail_lines.append(lines[i])
-                i += 1
-            
-            details_str = " ".join(detail_lines)
-            if 'Refunded' in details_str or 'Expired' in details_str:
-                current_curator['is_refunded'] = True
-                current_curator['status'] = 'Refunded'
-            elif 'Declined' in details_str:
-                current_curator['status'] = 'Declined'
-            elif 'Approved' in details_str:
-                current_curator['status'] = 'Approved'
-                
-            feedback_candidates = []
-            for dl in detail_lines:
-                dl_clean = dl.strip()
-                if any(x in dl_clean for x in ['Listened', 'Declined', 'Approved', 'Refunded', 'Expired', 'Translate', 'Specific enough', 'Could be better', 'To be shared:', 'in a Spotify', 'Shared', 'Manage', 'Review your experience']):
-                    continue
-                if re.match(r'^\d+\s+(year|month|day|week|hour|minute)s?\s+ago', dl_clean, re.IGNORECASE):
-                    continue
-                if '(Your rating will be kept anonymous)' in dl_clean:
-                    continue
-                if not dl_clean:
-                    continue
-                if re.search(r'\(\d+,?\d*\s+followers\s*\|', dl_clean, re.IGNORECASE):
-                    continue
-                if len(dl_clean) > 5:
-                    feedback_candidates.append(dl_clean)
-            
-            if feedback_candidates:
-                current_curator['feedback'] = " ".join(feedback_candidates)
-                
-            if current_curator['status'] == 'Approved':
-                for dl in detail_lines:
-                    if 'followers' in dl and '|' in dl:
-                        current_curator['share_destination'] = dl.strip()
-                        reach_match = re.search(r'\((\d{1,3}(?:,\d{3})*)\s+followers', dl, re.IGNORECASE)
-                        if reach_match:
-                            current_curator['estimated_reach'] = int(reach_match.group(1).replace(',', ''))
-            
-            if current_curator['is_refunded']:
-                current_curator['cost_usd'] = 0.0
-            else:
-                current_curator['cost_usd'] = round(credits * 0.85, 2)
-                
-            curators.append(current_curator)
-            i -= 1
-        i += 1
-    return curators
 
 @st.cache_data
 def process_data(dk_base_df, dk_files, spot_base_df, spot_files, s4a_base_df, s4a_files, meta_files, 
