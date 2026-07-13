@@ -837,6 +837,7 @@ with st.sidebar:
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
     has_db = bool(SUPABASE_URL and SUPABASE_KEY)
 
+
     dk_uploads = st.file_uploader("1. Add DistroKid Data", type="csv", accept_multiple_files=True)
     st.caption("📂 *Expects: DistroKid royalty CSV reports (e.g., DistroKid Results 6.12.26.csv)*")
     if has_db:
