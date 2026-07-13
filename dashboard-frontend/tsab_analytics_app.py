@@ -7,6 +7,10 @@ import urllib.request
 import ssl
 import re
 import pypdf
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- 1. SETUP & CONFIG & BRAND PATHS ---
 import os
@@ -115,6 +119,27 @@ def parse_int(val, default=0):
         return int(float(val_str))
     except Exception:
         return default
+
+def prepare_db_records(df):
+    if df is None or df.empty:
+        return []
+    records = df.to_dict(orient='records')
+    for r in records:
+        for k, v in r.items():
+            if pd.isna(v):
+                r[k] = None
+            elif isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
+                r[k] = v.isoformat()
+            elif isinstance(v, (int, float)) or hasattr(v, 'dtype'):
+                try:
+                    fval = float(v)
+                    if fval.is_integer():
+                        r[k] = int(fval)
+                    else:
+                        r[k] = fval
+                except Exception:
+                    pass
+    return records
 
 def parse_raw_text_content(content, song_name):
     lines = [line.strip() for line in content.split('\n')]
@@ -626,13 +651,7 @@ def save_submithub_to_db(url, key, df, purchases_df=None):
                 logger.error(f"Failed to delete existing SubmitHub rows for {song}: {e}")
                 
         # Insert new
-        records = df.to_dict(orient='records')
-        for r in records:
-            for k, v in r.items():
-                if isinstance(v, pd.Timestamp) or hasattr(v, 'isoformat'):
-                    r[k] = v.isoformat()
-                elif pd.isna(v):
-                    r[k] = None
+        records = prepare_db_records(df)
         
         endpoint = f"{url.rstrip('/')}/rest/v1/submithub_submissions"
         payload = json.dumps(records).encode('utf-8')
@@ -641,8 +660,14 @@ def save_submithub_to_db(url, key, df, purchases_df=None):
             with urllib.request.urlopen(req, context=ssl_context) as resp:
                 pass
         except Exception as e:
-            logger.error(f"Failed to insert new SubmitHub rows: {e}")
-            raise e
+            msg = str(e)
+            if hasattr(e, 'read'):
+                try:
+                    msg += " - " + e.read().decode('utf-8')
+                except Exception:
+                    pass
+            logger.error(f"Failed to insert new SubmitHub rows: {msg}")
+            raise Exception(f"Failed to insert new SubmitHub rows: {msg}")
             
     # 2. Save purchases (full deduplicated rewrite)
     if purchases_df is not None and not purchases_df.empty:
@@ -669,12 +694,9 @@ def save_submithub_to_db(url, key, df, purchases_df=None):
             except Exception:
                 pass
                 
-            records = combined.to_dict(orient='records')
+            records = prepare_db_records(combined)
             for r in records:
                 r.pop('id', None)
-                for k, v in r.items():
-                    if pd.isna(v):
-                        r[k] = None
             
             endpoint = f"{url.rstrip('/')}/rest/v1/submithub_credit_purchases"
             payload = json.dumps(records).encode('utf-8')
