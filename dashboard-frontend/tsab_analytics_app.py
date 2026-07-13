@@ -951,8 +951,11 @@ with st.sidebar:
                                 })
 
                     db_purchases = []
-                    if not submithub_purchases_base_df.empty:
-                        for idx, row in submithub_purchases_base_df.iterrows():
+                    sh_purchases_df = globals().get('submithub_purchases_base_df')
+                    if sh_purchases_df is None:
+                        sh_purchases_df = load_base_data("submithub_credit_purchases", "SubmitHub/submithub_credit_purchases.csv", {})
+                    if not sh_purchases_df.empty:
+                        for idx, row in sh_purchases_df.iterrows():
                             db_purchases.append({
                                 'purchase_date': pd.to_datetime(row['purchase_date']).isoformat(),
                                 'amount_paid_usd': float(row['amount_paid_usd']),
